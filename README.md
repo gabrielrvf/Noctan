@@ -62,6 +62,37 @@ O padrão é `sonnet`, atualmente resolvido pelo Agent SDK como Claude Sonnet 5.
 
 Claude Pro/Max e API são cobrados separadamente. Confira o uso no [Claude Console](https://platform.claude.com/usage).
 
+## Créditos da Claude API
+
+O Claude X utiliza a **Claude API**, não a franquia normal de mensagens do site ou aplicativo Claude. A assinatura, os limites do chat e a cobrança da API são sistemas diferentes.
+
+Segundo a documentação atual da Anthropic:
+
+| Plano | Crédito mensal para Claude Platform/API |
+| --- | ---: |
+| Free | Não incluído |
+| Pro | Não incluído |
+| Max 5x | US$ 100 por ciclo mensal |
+| Max 20x | US$ 200 por ciclo mensal |
+| Team | Depende do tipo e da quantidade de assentos |
+
+Os créditos dos planos elegíveis precisam ser **resgatados e vinculados a uma organização do Claude Console**. Eles não aparecem automaticamente em qualquer organização e não aumentam os limites do chat normal. Créditos não utilizados expiram no final do ciclo e não acumulam para o mês seguinte.
+
+### Preparar a API
+
+1. Entre em [Claude → Configurações de cobrança](https://claude.ai/settings/billing).
+2. Se o plano for Max ou Team elegível, localize a seção de créditos da API e selecione **Vincular organização**. Novos assinantes precisam cumprir o período de elegibilidade indicado pela Anthropic.
+3. Escolha ou crie uma organização no [Claude Console](https://platform.claude.com/).
+4. No Console, abra [API keys](https://platform.claude.com/settings/keys) e crie uma chave.
+5. Abra o Claude X, clique em **Conectar tudo**, cole a chave no campo protegido e confirme.
+6. Confira saldo, consumo, validade e eventual recarga automática na área de cobrança/uso do Console.
+
+A chave começa normalmente com `sk-ant-`. Ela deve ser colada somente na instalação local do Claude X. Nunca publique a chave no GitHub, em prints, no Vault ou em arquivos do projeto.
+
+Quando o crédito mensal acabar, as chamadas param se não houver outro saldo. Caso existam créditos comprados ou recarga automática ativa, o uso pode continuar e gerar cobrança conforme os preços da API. O limite por tarefa do Claude X é uma proteção local adicional; ele não compra créditos nem ativa recarga automática.
+
+Fontes oficiais: [créditos mensais para planos Max e Team](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans), [cobrança da API](https://support.anthropic.com/en/articles/8977456-how-do-i-pay-for-my-api-usage) e [diferença entre assinatura e API](https://support.anthropic.com/pt/articles/9876003-eu-tenho-uma-assinatura-de-um-plano-pago-do-claude-ai-por-que-tenho-que-pagar-separadamente-pelo-uso-da-api-no-console).
+
 ## Desenvolvimento
 
 Requisitos: Node.js 20+ e Windows 10/11.
