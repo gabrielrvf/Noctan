@@ -1,0 +1,11 @@
+node_modules/
+data/*
+!data/.gitkeep
+.env
+*.log
+dist/
+release/
+*.pfx
+*.p12
+*.pem
+*.key

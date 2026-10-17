@@ -1,0 +1,14 @@
+{
+  "workspace": "C:\\caminho\\para\\seu-projeto",
+  "vault": "",
+  "model": "sonnet",
+  "effort": "medium",
+  "maxTurns": 10,
+  "maxBudgetUsd": 1,
+  "settingSources": ["user", "project", "local"],
+  "pluginPaths": [],
+  "mcpConfigPaths": [],
+  "additionalDirectories": [],
+  "systemInstructions": "Nunca revele secrets. Confirme operações destrutivas e mudanças em produção.",
+  "safeMode": true
+}

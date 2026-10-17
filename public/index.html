@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Claude X</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="logo">✦</div>
+          <div><strong>CLAUDE X</strong><small>AGENTE DE BACKUP</small></div>
+        </div>
+        <input id="sessionSearch" class="search" placeholder="⌕  Procurar" />
+        <button id="new" class="newButton">＋ Novo</button>
+        <div class="sideNav">
+          <button id="connectBtn">◇ Conectar tudo</button>
+          <button id="projectBtn">▱ Projeto atual</button>
+          <button id="settingsBtn">⌘ Personalização</button>
+        </div>
+        <div class="section">RECENTES</div>
+        <div id="sessions" class="sessions"></div>
+        <div class="sidebarbottom">
+          <div class="profileDot">CX</div>
+          <div class="profileCopy">
+            <strong>Claude X</strong><small>API backup</small>
+          </div>
+          <div id="connection" class="connection">● Verificando API...</div>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <h1 id="conversationTitle">Novo chat</h1>
+            <span id="workspaceLabel"
+              >Escolha qualquer workspace para começar</span
+            >
+          </div>
+          <div class="headerRight">
+            <button id="usageBtn" class="ghost">
+              ◔ Uso · <span id="cost">US$ 0,0000</span>
+            </button>
+            <button id="discoverBtn" class="ghost">↻ Recursos</button>
+          </div>
+        </header>
+        <div id="chat" class="chat">
+          <div class="welcome">
+            <div class="biglogo">✦</div>
+            <h2>Seu Claude continua aqui.</h2>
+            <p>
+              Continue pelo Vault, CLAUDE.md e cadernos vivos quando o uso do
+              Claude normal acabar.
+            </p>
+            <div class="suggestions">
+              <button
+                data-prompt="Leia o CHATGPT_PREINSTRUCTION.md, localize o caderno vivo correto, confirme o estado real do workspace e continue exatamente de onde o trabalho parou. Antes de alterar qualquer coisa, resuma o que já foi feito, o que não deve ser repetido e o próximo passo."
+              >
+                Continuar do Vault</button
+              ><button
+                data-prompt="Analise o workspace atual e sugira os próximos passos, sem alterar arquivos."
+              >
+                Analisar workspace</button
+              ><button
+                data-prompt="Liste os MCPs e ferramentas disponíveis nesta sessão."
+              >
+                Verificar MCPs
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div id="pending" class="pending" hidden></div>
+          <textarea
+            id="prompt"
+            rows="2"
+            placeholder="Peça qualquer tarefa ao Claude X... (Ctrl+Enter para enviar)"
+          ></textarea>
+          <div class="composeFoot">
+            <span id="runStatus">Aguardando mensagem</span>
+            <div class="footerActions">
+              <button id="modelBtn" class="footerControl">
+                <span id="modelBtnLabel">Sonnet 5.5</span>
+                <span id="effortLabel">Médio</span>
+              </button>
+              <button
+                id="usageDot"
+                class="usageDot"
+                aria-label="Ver uso"
+              ></button>
+              <button id="cancel" class="ghost" hidden>Parar</button
+              ><button id="send" class="primary">Enviar ↗</button>
+            </div>
+          </div>
+          <section id="modelPopover" class="compactPopover modelPopover" hidden>
+            <small>Modelo · esta sessão</small>
+            <button class="choice" data-model="opus">
+              <span>Opus 5.5</span><b class="check">✓</b>
+            </button>
+            <button class="choice" data-model="fable">
+              <span>Fable 5.1</span><b class="check">✓</b>
+            </button>
+            <button class="choice" data-model="sonnet">
+              <span>Sonnet 5.5</span><b class="check">✓</b>
+            </button>
+            <button class="choice" data-model="haiku">
+              <span>Haiku 5.5</span><b class="check">✓</b>
+            </button>
+            <div class="separator"></div>
+            <small>Esforço</small>
+            <div class="effortChoices">
+              <button data-effort="low">Baixo</button
+              ><button data-effort="medium">Médio</button
+              ><button data-effort="high">Alto</button>
+            </div>
+            <div class="separator"></div>
+            <div class="fastRow">
+              <div><strong>Modo rápido</strong><small>Em breve</small></div>
+              <span class="disabledSwitch"></span>
+            </div>
+          </section>
+          <section id="usagePopover" class="compactPopover usagePopover" hidden>
+            <div class="popoverTitle"><strong>Uso</strong><span>⚙</span></div>
+            <div class="usageLine">
+              <strong>Limite desta tarefa</strong
+              ><span id="usagePercent">0% usado</span>
+            </div>
+            <div class="usageTrack"><i id="usageFill"></i></div>
+            <small id="usageBudgetLine">US$ 0,0000 de US$ 0,25</small>
+            <div class="separator"></div>
+            <div class="usageLine">
+              <strong>Histórico local</strong
+              ><span id="usageTotal">US$ 0,0000</span>
+            </div>
+            <a
+              href="https://platform.claude.com/usage"
+              target="_blank"
+              rel="noreferrer"
+              >Abrir uso oficial da API ↗</a
+            >
+          </section>
+        </div>
+      </main>
+    </div>
+    <div id="modal" class="overlay" hidden>
+      <section class="modal">
+        <div class="modalHead">
+          <h2>Configurações do agente</h2>
+          <button id="closeSettings" class="ghost">✕</button>
+        </div>
+        <p class="hint">
+          As configurações ficam somente neste PC. A chave da API é informada no
+          assistente Conectar tudo e nunca é salva em disco.
+        </p>
+        <label
+          >Workspace (caminho absoluto)<input
+            id="workspace"
+            placeholder="C:\\projetos\\match-app" /></label
+        ><label
+          >AI Memory Vault (caminho absoluto)<input
+            id="vault"
+            placeholder="C:\\Users\\...\\Documents\\AI_Memory_Vault"
+        /></label>
+        <div class="two">
+          <label>Modelo<input id="model" placeholder="sonnet" /></label
+          ><label
+            >Orçamento por tarefa (US$)<input
+              id="budget"
+              type="number"
+              min="0.05"
+              max="100"
+              step="0.05"
+          /></label>
+        </div>
+        <label
+          >Máximo de turnos<input
+            id="turns"
+            type="number"
+            min="1"
+            max="100" /></label
+        ><label
+          >Caminhos dos arquivos MCP JSON (um por linha)<textarea
+            id="mcp"
+            rows="3"
+          ></textarea></label
+        ><label
+          >Pastas de plugins locais (uma por linha)<textarea
+            id="plugins"
+            rows="3"
+          ></textarea></label
+        ><label
+          >Diretórios adicionais (um por linha)<textarea
+            id="extra"
+            rows="2"
+          ></textarea></label
+        ><label
+          >Instruções adicionais<textarea
+            id="instructions"
+            rows="3"
+            placeholder="Siga o caderno vivo e confirme alterações em produção."
+          ></textarea>
+        </label>
+        <div id="discovery" class="discovery"></div>
+        <div class="actions">
+          <button id="scan" class="ghost">Detectar no PC</button
+          ><button id="saveSettings" class="primary">Salvar</button>
+        </div>
+      </section>
+    </div>
+    <div id="connectModal" class="overlay" hidden>
+      <section class="modal connectModal">
+        <div class="modalHead">
+          <div>
+            <span class="eyebrow">CONFIGURAÇÃO RÁPIDA</span>
+            <h2>Conectar o Claude X</h2>
+          </div>
+          <button id="closeConnect" class="ghost">✕</button>
+        </div>
+        <p class="hint">
+          Uma vez conectado, o Claude X usa suas configurações locais do Claude
+          para trabalhar em qualquer projeto.
+        </p>
+        <div class="integrationGrid">
+          <div class="integration">
+            <span>Claude API</span><strong id="apiState">Pendente</strong>
+          </div>
+          <div class="integration">
+            <span>Vault e memória</span
+            ><strong id="vaultState">Detectado</strong>
+          </div>
+          <div class="integration">
+            <span>MCPs e ferramentas</span
+            ><strong id="mcpState">Detectados</strong>
+          </div>
+          <div class="integration">
+            <span>Plugins e skills</span
+            ><strong id="pluginState">Detectados</strong>
+          </div>
+        </div>
+        <label
+          >Chave da Anthropic API<input
+            id="apiKey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="sk-ant-••••••••••••••••"
+        /></label>
+        <p class="privacy">
+          A chave é enviada somente para <strong>127.0.0.1</strong>, fica na
+          memória deste processo e some quando o Claude X é fechado.
+        </p>
+        <div class="oauthNote">
+          <strong>Google e outros serviços</strong
+          ><span
+            >São acessados pelos MCPs já instalados. Cada serviço pode pedir
+            login próprio quando for usado pela primeira vez.</span
+          >
+        </div>
+        <p id="connectError" class="error" hidden></p>
+        <div class="actions">
+          <button id="openAdvanced" class="ghost">Ver detalhes</button
+          ><button id="connectAll" class="primary">Conectar tudo</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

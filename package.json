@@ -1,0 +1,53 @@
+{
+  "name": "claude-x",
+  "productName": "Claude X",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "desktop.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "desktop": "electron .",
+    "check": "node --check server.mjs && node --check desktop.mjs && node --check public/app.js && node --test tests/*.test.mjs",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.302"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.claudex.backup",
+    "productName": "Claude X",
+    "asar": true,
+    "files": [
+      "desktop.mjs",
+      "server.mjs",
+      "public/**/*",
+      "data/.gitkeep",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Claude-X-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
