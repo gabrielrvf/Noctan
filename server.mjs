@@ -182,7 +182,8 @@ async function pushLiveFollowUp(body) {
   const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
   session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
   await saveJson(SESSIONS, sessions);
-  const sdkMessage = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, priority: "now", origin: { kind: "human" } };
+  const steeringText = "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" + text;
+  const sdkMessage = { type: "user", message: { role: "user", content: steeringText }, parent_tool_use_id: null, priority: "now", origin: { kind: "human" } };
   if (running.query) {
     async function* one() { yield sdkMessage; }
     await running.query.streamInput(one());

@@ -9,6 +9,7 @@ test('active Claude session accepts live follow-up without cancelling current ta
  assert.match(server,/streamInput\(one\(\)\)/);
  assert.match(server,/priority: "now"/);
  assert.match(server,/origin: \{ kind: "human" \}/);
+ assert.match(server,/Continue todas as tarefas e raciocínios já em andamento/);
  assert.match(app,/if \(state\.running && state\.current\)/);
  assert.match(app,/request\("\/api\/follow-up"/);
  assert.match(app,/\$\("send"\)\.disabled=false/);
