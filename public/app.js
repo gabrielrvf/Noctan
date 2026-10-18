@@ -9,11 +9,11 @@ let state = {
   attachments: [],
   provider: "anthropic",
   editReplayIndex: null,
+  resumeInterrupted: false,
 };
 let sentPrompts = [];
 let promptHistoryIndex = -1;
 let promptDraft = "";
-let activeAssistantBubble = null;
 function resetPromptNavigation() {
   promptHistoryIndex = -1;
   promptDraft = "";
@@ -361,6 +361,10 @@ async function loadSession(id) {
   state.cost = cost;
   updateCost();
   updateSessions();
+  if (s.inFlight && !state.running) {
+    await resumeInterruptedRun(s);
+    return;
+  }
   if (s.pendingPrompt && !state.running) {
     history.replaceState({}, "", "/");
     $("prompt").value = s.pendingPrompt;
@@ -525,18 +529,24 @@ function approval(a) {
   }
   show(p, true);
 }
+async function resumeInterruptedRun(session) {
+  if (!session?.inFlight || state.running) return;
+  state.resumeInterrupted = true;
+  $("runStatus").textContent = "Retomando execução interrompida...";
+  await send();
+}
 async function send() {
   await stopDictationForSend();
-  const prompt = $("prompt").value.trim();
-  if (!prompt && !state.attachments.length) return;
+  const resumeInterrupted = Boolean(state.resumeInterrupted);
+  const prompt = resumeInterrupted ? "Retomar execução interrompida" : $("prompt").value.trim();
+  if (!resumeInterrupted && !prompt && !state.attachments.length) return;
   if (state.running && state.current) {
     if (!prompt) { message("system", "Envie texto no follow-up enquanto a execução está ativa."); return; }
     if (state.attachments.length) { message("system", "Imagens serão enviadas quando a execução atual terminar."); return; }
-    if (prompt) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
+    if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
     resetPromptNavigation();
     $("prompt").value = "";
     message("user", prompt);
-    if (activeAssistantBubble?.parentElement === $("chat")) $("chat").append(activeAssistantBubble);
     keepProgressLast();
     try {
       await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
@@ -546,7 +556,7 @@ async function send() {
     }
     return;
   }
-  if (prompt) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
+  if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
   resetPromptNavigation();
   const attachments = [...state.attachments];
   const replayEditIndex = Number.isInteger(state.editReplayIndex) ? state.editReplayIndex : null;
@@ -557,7 +567,7 @@ async function send() {
     $("chat").replaceChildren();
     $("conversationTitle").textContent = (prompt || "Imagem anexada").slice(0, 65);
   }
-  if (replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
+  if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
   setRunning(true);
   beginProgress();
   let response = null;
@@ -572,9 +582,11 @@ async function send() {
         sessionId: state.current,
         provider: state.provider,
         editReplayIndex: replayEditIndex,
+        resumeInterrupted,
       }),
     });
     state.editReplayIndex = null;
+    state.resumeInterrupted = false;
     if (!response.ok) {
       const j = await response.json();
       throw Error(j.error || "Erro");
@@ -606,7 +618,7 @@ async function send() {
         }
         if (type === "text") {
           updateProgress("Respondendo");
-          if (!assistant) { assistant = message("assistant", ""); activeAssistantBubble = assistant; }
+          if (!assistant) assistant = message("assistant", "");
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);
           keepProgressLast();
@@ -643,7 +655,6 @@ async function send() {
     message("system", e.message);
   } finally {
     endProgress();
-    activeAssistantBubble = null;
     await refresh().catch(() => {});
     setRunning(false);
     show($("pending"), false);
@@ -1466,10 +1477,11 @@ const pcHealthTimer = setInterval(() => refreshPcControllerHealth().catch(() => 
 refresh()
   .then(async () => {
     const requested = new URLSearchParams(location.search).get("session");
+    const interrupted = state.sessions.find((session) => session.inFlight);
     const latest = [...state.sessions].sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0];
     const selected = requested && state.sessions.some(session => session.id === requested)
       ? requested
-      : latest?.id;
+      : interrupted?.id || latest?.id;
     if (selected) await loadSession(selected);
   })
   .catch((e) => message("system", e.message));

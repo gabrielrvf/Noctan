@@ -177,15 +177,8 @@ async function pushLiveFollowUp(body) {
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
   if (!session) throw Error("Conversa não encontrada");
-  const activeAssistant = running.assistantRecordRef || null;
-  if (activeAssistant) {
-    const idx = session.messages.indexOf(activeAssistant);
-    if (idx >= 0) session.messages.splice(idx, 1);
-  }
   const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
-  session.messages.push(item);
-  if (activeAssistant) { activeAssistant.at = new Date().toISOString(); session.messages.push(activeAssistant); }
-  session.updatedAt = item.at; sessions[id] = session;
+  session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
   await saveJson(SESSIONS, sessions);
   const steeringText = "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" + text;
   const sdkMessage = { type: "user", message: { role: "user", content: steeringText }, parent_tool_use_id: null, priority: "now", origin: { kind: "human" } };
@@ -264,6 +257,7 @@ function sessionView(s) {
     claudeSessionId: s.claudeSessionId || null,
     openaiResponseId: s.openaiResponseId || null,
     pendingPrompt: s.pendingPrompt || null,
+    inFlight: s.inFlight || null,
   };
 }
 function send(res, type, data) {
@@ -358,6 +352,7 @@ async function runAgent(req, res) {
   if (active.has(id))
     return json(res, 409, { error: "JÃ¡ existe execuÃ§Ã£o nessa conversa." });
   const editReplayIndex = Number.isInteger(body.editReplayIndex) ? body.editReplayIndex : null;
+  const resumeInterrupted = Boolean(body.resumeInterrupted);
   const s = sessions[id] || {
     id,
     title: (originalPrompt || "Imagem anexada").slice(0, 65),
@@ -373,7 +368,7 @@ async function runAgent(req, res) {
   delete s.pendingPrompt;
   const replayingEdit = editReplayIndex !== null && s.messages?.[editReplayIndex]?.role === "user";
   const historyForRebuild = !s.claudeSessionId ? (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])]) : [];
-  if (!replayingEdit) s.messages.push({
+  if (!replayingEdit && !resumeInterrupted) s.messages.push({
     role: "user",
     text: originalPrompt || "Imagem anexada",
     attachments: savedAttachments.map((path) => basename(path)),
@@ -381,6 +376,13 @@ async function runAgent(req, res) {
     at: new Date().toISOString(),
   });
   s.updatedAt = new Date().toISOString();
+  s.inFlight = {
+    provider,
+    startedAt: s.inFlight?.startedAt || s.updatedAt,
+    lastCheckpointAt: s.updatedAt,
+    originalPrompt: resumeInterrupted ? (s.inFlight?.originalPrompt || originalPrompt) : originalPrompt,
+    resumeCount: resumeInterrupted ? Number(s.inFlight?.resumeCount || 0) + 1 : 0,
+  };
   sessions[id] = s;
   await saveJson(SESSIONS, sessions);
   res.writeHead(200, {
@@ -392,7 +394,7 @@ async function runAgent(req, res) {
   });
   send(res, "start", { sessionId: id });
   const ctrl = new AbortController();
-  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider, assistantRecordRef: null });
+  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider });
   let finalText = "",
     spent = 0,
     assistantRecord = null;
@@ -402,14 +404,13 @@ async function runAgent(req, res) {
     if (!assistantRecord) {
       assistantRecord = { role: "assistant", text, costUsd: spent, provider, at: new Date().toISOString() };
       s.messages.push(assistantRecord);
-      const live = active.get(id);
-      if (live) live.assistantRecordRef = assistantRecord;
     } else {
       assistantRecord.text = text;
       assistantRecord.costUsd = spent;
       assistantRecord.provider = provider;
     }
     s.updatedAt = new Date().toISOString();
+    if (s.inFlight) s.inFlight.lastCheckpointAt = s.updatedAt;
     sessions[id] = s;
     await saveJson(SESSIONS, sessions);
   };
@@ -515,14 +516,15 @@ async function runAgent(req, res) {
         });
       });
     };
-    let effectivePrompt = prompt;
+    const crashResumePrompt = "A execução anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessão. Não repita ações, comandos, alterações, commits, deploys ou etapas que já tenham sido concluídos. Primeiro confira o contexto e resultados já presentes na sessão; depois continue apenas o que ficou pendente. Preserve todas as instruções e follow-ups do usuário já recebidos.";
+    let effectivePrompt = resumeInterrupted ? crashResumePrompt : prompt;
     if (historyForRebuild.length) {
       const rebuilt = historyForRebuild
         .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
         .slice(-80)
         .map((m) => "[" + (m.role === "user" ? "Usuário" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
         .join("\n\n");
-      effectivePrompt = "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + prompt;
+      effectivePrompt = "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
     }
     const q = query({ prompt: effectivePrompt, options: opts });
     const runningEntry = active.get(id);
@@ -534,7 +536,12 @@ async function runAgent(req, res) {
       }
     }
     for await (const m of q) {
-      if (m.session_id) s.claudeSessionId = m.session_id;
+      if (m.session_id) {
+        s.claudeSessionId = m.session_id;
+        if (s.inFlight) s.inFlight.lastCheckpointAt = new Date().toISOString();
+        sessions[id] = s;
+        await saveJson(SESSIONS, sessions);
+      }
       if (m.type === "assistant") {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
@@ -568,6 +575,10 @@ async function runAgent(req, res) {
       s.updatedAt = new Date().toISOString();
       await saveJson(SESSIONS, sessions);
     }
+    delete s.inFlight;
+    s.updatedAt = new Date().toISOString();
+    sessions[id] = s;
+    await saveJson(SESSIONS, sessions);
     send(res, "done", { sessionId: id });
   } catch (e) {
     const msg = String(e?.message || e);
@@ -578,6 +589,9 @@ async function runAgent(req, res) {
       text: "Erro: " + msg.slice(0, 2000),
       at: new Date().toISOString(),
     });
+    delete s.inFlight;
+    s.updatedAt = new Date().toISOString();
+    sessions[id] = s;
     await saveJson(SESSIONS, sessions);
   } finally {
     active.delete(id);
