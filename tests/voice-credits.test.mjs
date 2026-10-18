@@ -17,3 +17,10 @@ test('credits open in the authenticated system browser',()=>{
  assert.match(js,/window\.open\("https:\/\/platform\.claude\.com\/settings\/billing"/);
  assert.doesNotMatch(js,/show\(\$\("officialCreditsModal"\), true\)/);
 });
+
+test('prewarmed socket keeps ready state when recording starts', () => {
+ const js=read('public/app.js');
+ assert.match(js,/const ready = Boolean\(canReuse && sttWarmReady\)/);
+ assert.match(js,/return \{ ws, ready \}/);
+ assert.match(js,/sttReady = warm\.ready/);
+});

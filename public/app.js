@@ -1174,10 +1174,11 @@ function prewarmStt() {
   return sttWarmPromise;
 }
 function takeWarmSttSocket() {
-  const ws = sttWarmSocket && (sttWarmSocket.readyState === WebSocket.OPEN || sttWarmSocket.readyState === WebSocket.CONNECTING)
-    ? sttWarmSocket : new WebSocket("ws://" + location.host + "/api/stt-stream");
+  const canReuse = sttWarmSocket && (sttWarmSocket.readyState === WebSocket.OPEN || sttWarmSocket.readyState === WebSocket.CONNECTING);
+  const ws = canReuse ? sttWarmSocket : new WebSocket("ws://" + location.host + "/api/stt-stream");
+  const ready = Boolean(canReuse && sttWarmReady);
   sttWarmSocket = null; sttWarmReady = false; sttWarmPromise = null;
-  return ws;
+  return { ws, ready };
 }
 let sttReady = false;
 let sttBuffered = [];
@@ -1278,8 +1279,11 @@ async function startRecording() {
   $("runStatus").textContent = "Carregando reconhecimento local...";
   beginVoiceVisual();
   try {
-    const ws = takeWarmSttSocket();
+    const warm = takeWarmSttSocket();
+    const ws = warm.ws;
+    sttReady = warm.ready;
     sttSocket = ws;
+    if (sttReady) $("runStatus").textContent = "Transcrevendo ao vivo...";
     ws.onmessage = async ({ data }) => {
       let event;
       try { event = JSON.parse(data); } catch { return; }
@@ -1397,7 +1401,17 @@ async function stopRecording() {
       ws.close();
       resolveStreamingStop();
     }
-    await Promise.race([sttDone, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    const completed = await Promise.race([
+      sttDone.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+    ]);
+    if (!completed) {
+      try { ws.close(); } catch {}
+      resolveStreamingStop();
+      if (!voiceDiscard && sttPartial) $("runStatus").textContent = "Transcrição concluída";
+      else if (!voiceDiscard) $("runStatus").textContent = "Não foi possível finalizar a transcrição";
+      setTimeout(() => prewarmStt().catch(() => {}), 250);
+    }
     sttSocket = null;
     return;
   }
