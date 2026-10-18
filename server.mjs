@@ -177,10 +177,12 @@ async function pushLiveFollowUp(body) {
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
   if (!session) throw Error("Conversa não encontrada");
+  running.segmentStart = Number(running.finalTextLength || 0);
+  running.newAssistantSegment = true;
   const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
   session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
   await saveJson(SESSIONS, sessions);
-  const sdkMessage = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, priority: "next" };
+  const sdkMessage = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, priority: "now", origin: { kind: "human" } };
   if (running.query) {
     async function* one() { yield sdkMessage; }
     await running.query.streamInput(one());
@@ -384,12 +386,15 @@ async function runAgent(req, res) {
   });
   send(res, "start", { sessionId: id });
   const ctrl = new AbortController();
-  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider });
+  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider, finalTextLength: 0, segmentStart: 0, newAssistantSegment: false });
   let finalText = "",
     spent = 0,
     assistantRecord = null;
   const persistAssistant = async () => {
-    const text = finalText.trim();
+    const runningEntry = active.get(id);
+    if (runningEntry?.newAssistantSegment) { assistantRecord = null; runningEntry.newAssistantSegment = false; }
+    const segmentStart = Number(runningEntry?.segmentStart || 0);
+    const text = finalText.slice(segmentStart).trim();
     if (!text) return;
     if (!assistantRecord) {
       assistantRecord = { role: "assistant", text, costUsd: spent, provider, at: new Date().toISOString() };
@@ -529,6 +534,8 @@ async function runAgent(req, res) {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
             finalText += b.text + "\n";
+            const liveRun = active.get(id);
+            if (liveRun) liveRun.finalTextLength = finalText.length;
             send(res, "text", { text: b.text });
             await persistAssistant();
           } else if (b.type === "tool_use")

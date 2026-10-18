@@ -13,6 +13,7 @@ let state = {
 let sentPrompts = [];
 let promptHistoryIndex = -1;
 let promptDraft = "";
+let liveResponseEpoch = 0;
 function resetPromptNavigation() {
   promptHistoryIndex = -1;
   promptDraft = "";
@@ -535,6 +536,7 @@ async function send() {
     resetPromptNavigation();
     $("prompt").value = "";
     message("user", prompt);
+    liveResponseEpoch += 1;
     keepProgressLast();
     try {
       await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
@@ -560,6 +562,7 @@ async function send() {
   beginProgress();
   let response = null;
   let assistant = null;
+  let assistantEpoch = liveResponseEpoch;
   try {
     response = await fetch("/api/run", {
       method: "POST",
@@ -604,6 +607,7 @@ async function send() {
         }
         if (type === "text") {
           updateProgress("Respondendo");
+          if (assistantEpoch !== liveResponseEpoch) { assistant = null; assistantEpoch = liveResponseEpoch; }
           if (!assistant) assistant = message("assistant", "");
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);

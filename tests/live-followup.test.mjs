@@ -7,7 +7,8 @@ const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 test('active Claude session accepts live follow-up without cancelling current task',()=>{
  assert.match(server,/path === "\/api\/follow-up"/);
  assert.match(server,/streamInput\(one\(\)\)/);
- assert.match(server,/priority: "next"/);
+ assert.match(server,/priority: "now"/);
+ assert.match(server,/origin: \{ kind: "human" \}/);
  assert.match(app,/if \(state\.running && state\.current\)/);
  assert.match(app,/request\("\/api\/follow-up"/);
  assert.match(app,/\$\("send"\)\.disabled=false/);
@@ -32,4 +33,11 @@ test('speech recognizer is prewarmed before first dictation',()=>{
  assert.match(app,/function prewarmStt/);
  assert.match(app,/setTimeout\(\(\) => prewarmStt\(\)/);
  assert.match(app,/takeWarmSttSocket/);
+});
+
+test('follow-up creates a new assistant segment under the new user message',()=>{
+ assert.match(app,/liveResponseEpoch \+= 1/);
+ assert.match(app,/assistantEpoch !== liveResponseEpoch/);
+ assert.match(server,/running\.newAssistantSegment = true/);
+ assert.match(server,/finalText\.slice\(segmentStart\)/);
 });
