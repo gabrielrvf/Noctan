@@ -167,31 +167,88 @@ async function editSessionUserMessage(id, index, text) {
   return { session, index };
 }
 
+async function saveImageAttachments(items) {
+  const attachments = Array.isArray(items) ? items.slice(0, 5) : [];
+  const saved = [];
+  if (!attachments.length) return saved;
+  await mkdir(ATTACHMENTS, { recursive: true });
+  for (const item of attachments) {
+    const match = String(item?.dataUrl || "").match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) throw Error("Formato de imagem não permitido.");
+    const bytes = Buffer.from(match[2], "base64");
+    if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
+    const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
+    const path = join(ATTACHMENTS, randomUUID() + "." + ext);
+    await writeFile(path, bytes, { mode: 0o600 });
+    saved.push(path);
+  }
+  return saved;
+}
 async function pushLiveFollowUp(body) {
   const id = String(body.sessionId || "");
   const running = active.get(id);
   if (!running) throw Error("Não há execução ativa nesta conversa.");
   if (running.provider !== "anthropic") throw Error("Follow-up ao vivo está disponível para o Claude.");
+
   const text = String(body.prompt || "").trim();
-  if (!text || text.length > 40000) throw Error("Mensagem vazia ou muito longa.");
+  const savedAttachments = await saveImageAttachments(body.attachments);
+  if ((!text && !savedAttachments.length) || text.length > 40000)
+    throw Error("Mensagem vazia ou muito longa.");
+
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
   if (!session) throw Error("Conversa não encontrada");
+
   running.segmentBreakRequested = true;
-  const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
-  session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
+  const item = {
+    role: "user",
+    text: text || "Imagem anexada",
+    attachments: savedAttachments.map((path) => basename(path)),
+    provider: "anthropic",
+    liveFollowUp: true,
+    at: new Date().toISOString(),
+  };
+  session.messages.push(item);
+  session.updatedAt = item.at;
+  sessions[id] = session;
   await saveJson(SESSIONS, sessions);
-  const steeringText = "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" + text;
-  const sdkMessage = { type: "user", message: { role: "user", content: steeringText }, parent_tool_use_id: null, priority: "now", origin: { kind: "human" } };
+
+  const attachmentContext = savedAttachments.length
+    ? "\n\nImagens anexadas pelo usuário agora (use a ferramenta Read para visualizá-las):\n" +
+      savedAttachments.map((path) => "- " + path).join("\n")
+    : "";
+  const userContent = (text || "Analise as imagens anexadas.") + attachmentContext;
+  const steeringText =
+    "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" +
+    userContent;
+
+  const sdkMessage = {
+    type: "user",
+    message: { role: "user", content: steeringText },
+    parent_tool_use_id: null,
+    priority: "now",
+    origin: { kind: "human" },
+  };
+
   if (running.query) {
     async function* one() { yield sdkMessage; }
     await running.query.streamInput(one());
   } else {
-    running.pendingInputs = running.pendingInputs || []; running.pendingInputs.push(sdkMessage);
+    running.pendingInputs ||= [];
+    running.pendingInputs.push(sdkMessage);
   }
-  if (running.res) send(running.res, "notice", { text: "Nova mensagem recebida durante a execução.", kind: "follow-up" });
+
+  if (running.res) {
+    send(running.res, "notice", {
+      text: savedAttachments.length
+        ? "Nova mensagem com imagem recebida durante a execução."
+        : "Nova mensagem recebida durante a execução.",
+      kind: "follow-up",
+    });
+  }
   return item;
 }
+
 const readBody = async (req) => {
   let s = "";
   for await (const c of req) {

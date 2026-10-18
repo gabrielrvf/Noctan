@@ -159,6 +159,30 @@ async function editUserMessage(index, currentText) {
   await send();
 }
 function note(text) { if(progressUI) addProgressEvent(text); else message("system",text); }
+function openAttachmentPreview(item) {
+  let dialog = $("attachmentPreviewDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "attachmentPreviewDialog";
+    dialog.className = "attachmentPreviewDialog";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "attachmentPreviewClose";
+    close.textContent = "×";
+    close.setAttribute("aria-label", "Fechar visualização");
+    const img = document.createElement("img");
+    img.className = "attachmentPreviewImage";
+    img.alt = "Pré-visualização da imagem";
+    dialog.append(close, img);
+    close.onclick = () => dialog.close();
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+    document.body.append(dialog);
+  }
+  const img = dialog.querySelector(".attachmentPreviewImage");
+  img.src = item.dataUrl;
+  img.alt = item.name || "Imagem anexada";
+  dialog.showModal();
+}
 function renderAttachments() {
   const tray = $("attachmentTray");
   tray.replaceChildren();
@@ -168,6 +192,10 @@ function renderAttachments() {
     const image = document.createElement("img");
     image.src = item.dataUrl;
     image.alt = item.name;
+    image.title = "Clique para visualizar";
+    image.tabIndex = 0;
+    image.onclick = () => openAttachmentPreview(item);
+    image.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openAttachmentPreview(item); } };
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "\u00d7";
@@ -543,17 +571,22 @@ async function send() {
   const prompt = resumeInterrupted ? "Retomar execução interrompida" : $("prompt").value.trim();
   if (!resumeInterrupted && !prompt && !state.attachments.length) return;
   if (state.running && state.current) {
-    if (!prompt) { message("system", "Envie texto no follow-up enquanto a execução está ativa."); return; }
-    if (state.attachments.length) { message("system", "Imagens serão enviadas quando a execução atual terminar."); return; }
+    const attachments = [...state.attachments];
+    if (!prompt && !attachments.length) return;
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
     resetPromptNavigation();
     $("prompt").value = "";
-    message("user", prompt);
+    message("user", prompt || "Imagem anexada", attachments.length);
     assistantSegmentEpoch += 1;
     keepProgressLast();
     try {
-      await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
-      addProgressEvent("Nova mensagem enviada ao agente durante a execução.");
+      await request("/api/follow-up", {
+        method: "POST",
+        body: JSON.stringify({ sessionId: state.current, prompt, attachments }),
+      });
+      state.attachments = [];
+      renderAttachments();
+      addProgressEvent(attachments.length ? "Nova mensagem com imagem enviada ao agente durante a execução." : "Nova mensagem enviada ao agente durante a execução.");
     } catch (error) {
       message("system", error.message);
     }

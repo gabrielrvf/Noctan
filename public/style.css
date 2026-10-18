@@ -1064,3 +1064,9 @@ h1 {
 .messageEdit:hover{background:#3a3a3a;color:#fff}
 
 #runStatus{display:inline-flex;align-items:center;min-height:28px;line-height:1.2;margin-left:2px}
+
+.attachmentCard img{cursor:zoom-in}
+.attachmentPreviewDialog{width:min(92vw,1100px);max-width:92vw;max-height:90vh;padding:14px;border:1px solid #444;border-radius:14px;background:#111;color:#fff}
+.attachmentPreviewDialog::backdrop{background:rgba(0,0,0,.82)}
+.attachmentPreviewImage{display:block;max-width:100%;max-height:82vh;margin:auto;object-fit:contain;border-radius:9px}
+.attachmentPreviewClose{position:absolute;top:10px;right:10px;width:34px;height:34px;padding:0;border:1px solid #555;border-radius:50%;background:#1d1d1d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;z-index:2}
