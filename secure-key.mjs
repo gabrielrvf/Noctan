@@ -66,3 +66,17 @@ export async function removeApiKey(destination) {
 }
 
 
+
+export async function saveSecret(value, destination) {
+  if (!value) throw Error("Segredo vazio.");
+  const encrypted = transform("protect", String(value));
+  await mkdir(dirname(destination), { recursive: true });
+  const temp = destination + ".tmp";
+  await writeFile(temp, encrypted, { encoding: "utf8", mode: 0o600, flag: "w" });
+  await rename(temp, destination);
+}
+export async function loadSecret(destination) {
+  if (!existsSync(destination)) return null;
+  const encrypted = await readFile(destination, "utf8");
+  return transform("unprotect", encrypted.trim());
+}

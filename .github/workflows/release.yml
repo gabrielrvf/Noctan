@@ -46,3 +46,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win nsis --publish always
+
+  mobile:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build generic Android APK
+        shell: pwsh
+        run: |
+          cd mobile/android
+          ./gradlew.bat :app:assembleRelease
+          Copy-Item app/build/outputs/apk/release/app-release.apk ../../Noctan-Mobile.apk
+
+      - name: Attach APK to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: gh release upload "v1.0.${{ github.run_number }}" Noctan-Mobile.apk --clobber

@@ -173,11 +173,21 @@ async function saveImageAttachments(items) {
   if (!attachments.length) return saved;
   await mkdir(ATTACHMENTS, { recursive: true });
   for (const item of attachments) {
-    const match = String(item?.dataUrl || "").match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw Error("Formato de imagem não permitido.");
+    const match = String(item?.dataUrl || "").match(/^data:([^;]{1,120});base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) throw Error("Formato de anexo não permitido.");
     const bytes = Buffer.from(match[2], "base64");
-    if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
-    const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
+    if (bytes.length > 20_000_000) throw Error("Anexo maior que 20 MB.");
+    const mime = String(match[1] || "application/octet-stream").toLowerCase();
+    const mimeExt = {
+      "image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif",
+      "application/pdf":"pdf","text/plain":"txt","text/markdown":"md","application/json":"json",
+      "text/csv":"csv","application/zip":"zip",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":"docx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":"xlsx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation":"pptx"
+    }[mime];
+    const fromName = String(item?.name || "").toLowerCase().match(/.([a-z0-9]{1,8})$/)?.[1];
+    const ext = mimeExt || fromName || "bin";
     const path = join(ATTACHMENTS, randomUUID() + "." + ext);
     await writeFile(path, bytes, { mode: 0o600 });
     saved.push(path);
@@ -214,10 +224,10 @@ async function pushLiveFollowUp(body) {
   await saveJson(SESSIONS, sessions);
 
   const attachmentContext = savedAttachments.length
-    ? "\n\nImagens anexadas pelo usuário agora (use a ferramenta Read para visualizá-las):\n" +
+    ? "\n\nArquivos anexados pelo usuário agora (use as ferramentas disponíveis para lê-los/inspecioná-los):\n" +
       savedAttachments.map((path) => "- " + path).join("\n")
     : "";
-  const userContent = (text || "Analise as imagens anexadas.") + attachmentContext;
+  const userContent = (text || "Analise os arquivos anexados.") + attachmentContext;
   const steeringText =
     "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" +
     userContent;

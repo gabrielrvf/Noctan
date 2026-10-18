@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    buildFeatures { buildConfig true }
+    namespace 'app.noctan.mobile'
+    compileSdk 34
+
+    def esc = { String v -> (v ?: '').replace('\\','\\\\').replace('\"','\\\"') }
+    def mobileBase = esc(System.getenv('NOCTAN_MOBILE_BASE'))
+    def mobileToken = esc(System.getenv('NOCTAN_MOBILE_TOKEN'))
+
+    defaultConfig {
+        applicationId 'app.noctan.mobile'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'MOBILE_DEFAULT_BASE', '"' + mobileBase + '"'
+        buildConfigField 'String', 'MOBILE_DEFAULT_TOKEN', '"' + mobileToken + '"'
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+}

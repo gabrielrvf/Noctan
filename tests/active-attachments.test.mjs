@@ -9,7 +9,7 @@ const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8'
 test('active run accepts image-only and text-plus-image follow-ups', () => {
   assert.match(server, /saveImageAttachments\(body\.attachments\)/);
   assert.match(server, /text \|\| "Imagem anexada"/);
-  assert.match(server, /Imagens anexadas pelo usuário agora/);
+  assert.match(server, /Arquivos anexados pelo usuário agora/);
   assert.match(server, /priority: "now"/);
   assert.match(app, /const attachments = \[\.\.\.state\.attachments\]/);
   assert.match(app, /JSON\.stringify\(\{ sessionId: state\.current, prompt, attachments \}\)/);

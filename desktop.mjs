@@ -125,6 +125,7 @@ async function createWindow(targetUrl = APP_URL) {
   process.env.NOCTAN_DATA_DIR = join(app.getPath("appData"), "Noctan", "data");
   await import("./server.mjs");
   await waitForServer();
+  await import("./mobile-gateway.mjs");
 
   const appIcon = join(app.getAppPath(), "public", "noctan-mark.png");
 

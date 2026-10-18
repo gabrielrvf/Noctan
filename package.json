@@ -47,7 +47,8 @@
       "node_modules/**/*",
       "realtime-stt-worker.mjs",
       "secure-key.mjs",
-      "preload.cjs"
+      "preload.cjs",
+      "mobile-gateway.mjs"
     ],
     "directories": {
       "output": "dist"
