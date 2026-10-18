@@ -36,9 +36,15 @@ test('speech recognizer is prewarmed before first dictation',()=>{
  assert.match(app,/takeWarmSttSocket/);
 });
 
-test('follow-up creates a new assistant segment under the new user message',()=>{
- assert.match(app,/liveResponseEpoch \+= 1/);
- assert.match(app,/assistantEpoch !== liveResponseEpoch/);
- assert.match(server,/running\.newAssistantSegment = true/);
- assert.match(server,/finalText\.slice\(segmentStart\)/);
+test('active assistant bubble moves below live follow-ups',()=>{
+ assert.match(app,/activeAssistantBubble/);
+ assert.match(app,/append\(activeAssistantBubble\)/);
+ assert.match(server,/assistantRecordRef/);
+});
+
+test('active assistant response moves below follow-ups and keeps streaming',()=>{
+ assert.match(app,/activeAssistantBubble/);
+ assert.match(app,/append\(activeAssistantBubble\)/);
+ assert.match(server,/assistantRecordRef/);
+ assert.doesNotMatch(server,/newAssistantSegment/);
 });

@@ -13,7 +13,7 @@ let state = {
 let sentPrompts = [];
 let promptHistoryIndex = -1;
 let promptDraft = "";
-let liveResponseEpoch = 0;
+let activeAssistantBubble = null;
 function resetPromptNavigation() {
   promptHistoryIndex = -1;
   promptDraft = "";
@@ -536,7 +536,7 @@ async function send() {
     resetPromptNavigation();
     $("prompt").value = "";
     message("user", prompt);
-    liveResponseEpoch += 1;
+    if (activeAssistantBubble?.parentElement === $("chat")) $("chat").append(activeAssistantBubble);
     keepProgressLast();
     try {
       await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
@@ -562,7 +562,6 @@ async function send() {
   beginProgress();
   let response = null;
   let assistant = null;
-  let assistantEpoch = liveResponseEpoch;
   try {
     response = await fetch("/api/run", {
       method: "POST",
@@ -607,8 +606,7 @@ async function send() {
         }
         if (type === "text") {
           updateProgress("Respondendo");
-          if (assistantEpoch !== liveResponseEpoch) { assistant = null; assistantEpoch = liveResponseEpoch; }
-          if (!assistant) assistant = message("assistant", "");
+          if (!assistant) { assistant = message("assistant", ""); activeAssistantBubble = assistant; }
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);
           keepProgressLast();
@@ -645,6 +643,7 @@ async function send() {
     message("system", e.message);
   } finally {
     endProgress();
+    activeAssistantBubble = null;
     await refresh().catch(() => {});
     setRunning(false);
     show($("pending"), false);
