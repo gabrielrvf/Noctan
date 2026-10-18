@@ -394,7 +394,7 @@ async function runAgent(req, res) {
   });
   send(res, "start", { sessionId: id });
   const ctrl = new AbortController();
-  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider });
+  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider, autoApproveAll: false });
   let finalText = "",
     spent = 0,
     assistantRecord = null;
@@ -419,6 +419,7 @@ async function runAgent(req, res) {
       const { runOpenAI } = await import("./openai-provider.mjs");
       const askApproval = async (toolName, input) => {
         if (ctrl.signal.aborted) return false;
+        if (active.get(id)?.autoApproveAll) return true;
         const aid = randomUUID();
         send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
         return await new Promise((resolve) => {
@@ -956,8 +957,17 @@ const server = http.createServer(async (req, res) => {
         return json(res, 404, {
           error: "AprovaÃ§Ã£o nÃ£o encontrada ou expirada",
         });
+      if (b.allowAll === true && b.allow === true) {
+        const run = active.get(a.sessionId);
+        if (run) run.autoApproveAll = true;
+      }
       a.decide(b.allow === true);
-      return json(res, 200, { ok: true });
+      if (b.allowAll === true && b.allow === true) {
+        for (const [approvalId, pending] of approvals) {
+          if (approvalId !== b.id && pending.sessionId === a.sessionId) pending.decide(true);
+        }
+      }
+      return json(res, 200, { ok: true, allowAll: Boolean(b.allowAll && b.allow) });
     }
     if (req.method === "POST" && path === "/api/cancel") {
       const b = await readBody(req),
