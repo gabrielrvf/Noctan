@@ -18,7 +18,9 @@ test("UI references required controls", () => {
     "sessions",
     "connectBtn",
     "connectModal",
-    "apiKey",
+    "anthropicApiKey",
+    "tunnelRuntimeKey",
+    "pcControllerBtn",
     "connectAll",
     "usageBtn",
     "usagePopover",
@@ -37,13 +39,15 @@ test("configuration path arrays resolve one path at a time", () => {
   assert.match(s, /\.map\(\s*\(x\)\s*=>\s*resolve\(x\)\s*\)/);
   assert.doesNotMatch(s, /\.map\(\s*resolve\s*\)/);
 });
-test("API key is accepted only in memory and never written by connect route", () => {
+test("API key remains outside plaintext configuration", () => {
   const s = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const route = s.slice(
     s.indexOf('path === "/api/connect"'),
-    s.indexOf('path === "/api/autoconfigure"'),
+    s.indexOf('path === "/api/connect"', s.indexOf('path === "/api/connect"') + 1),
   );
   assert.match(route, /process\.env\.ANTHROPIC_API_KEY\s*=\s*key/);
-  assert.ok(!route.includes("saveJson"));
+  assert.match(route, /await saveApiKey\(key, destination, provider\)/);
   assert.ok(!route.includes("writeFile"));
+  assert.match(s, /TUNNEL_SECRET_FILE/);
+  assert.match(s, /saveApiKey\(key, TUNNEL_SECRET_FILE, "tunnel"\)/);
 });

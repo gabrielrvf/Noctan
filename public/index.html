@@ -3,43 +3,51 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Claude X</title>
+    <title>Noctan</title>
+    <link rel="icon" type="image/png" href="/noctan-mark.png" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <div class="layout">
       <aside class="sidebar">
         <div class="brand">
-          <div class="logo">✦</div>
-          <div><strong>CLAUDE X</strong><small>AGENTE DE BACKUP</small></div>
+          <div class="logo"><img src="/noctan-mark.png" alt="" /></div>
+          <div><strong>NOCTAN</strong><small>WORKSPACE DE IA</small></div>
         </div>
-        <input id="sessionSearch" class="search" placeholder="⌕  Procurar" />
-        <button id="new" class="newButton">＋ Novo</button>
+        <input id="sessionSearch" class="search" placeholder="Procurar" />
+        <button id="new" class="newButton">+ Novo</button>
         <div class="sideNav">
-          <button id="connectBtn">◇ Conectar tudo</button>
-          <button id="projectBtn">▱ Projeto atual</button>
-          <button id="settingsBtn">⌘ Personalização</button>
+          <button id="connectBtn">Conectar tudo</button>
+          <button id="projectBtn">Projeto atual</button>
+          <button id="settingsBtn">&#9881; Personaliza&ccedil;&atilde;o</button>
         </div>
         <div class="section">RECENTES</div>
         <div id="sessions" class="sessions"></div>
         <div class="sidebarbottom">
-          <div class="profileDot">CX</div>
+          <button id="sidebarCredits" class="sidebarCredits" type="button" title="Abrir cr&eacute;ditos oficiais da Anthropic">
+            <span class="creditsIcon">&#9684;</span><span>Cr&eacute;ditos</span><strong id="creditBalance">Ver na Anthropic</strong>
+          </button>
+          <div class="profileDot">N</div>
           <div class="profileCopy">
-            <strong>Claude X</strong><small>API backup</small>
+            <strong>Noctan</strong><small>assistente local</small>
           </div>
-          <div id="connection" class="connection">● Verificando API...</div>
+          <div id="connection" class="connection">&bull; Verificando API...</div>
         </div>
       </aside>
       <main>
         <header>
           <div>
-            <h1 id="conversationTitle">Novo chat</h1>
+            <div class="titleRow">
+              <h1 id="conversationTitle">Novo chat</h1>
+              <button id="newWindow" class="newWindowButton" title="Abrir outra janela">↗ Nova janela</button>
+            </div>
             <span id="workspaceLabel"
               >Escolha qualquer workspace para começar</span
             >
           </div>
           <div class="headerRight">
-            <button id="usageBtn" class="ghost">
+            <button id="pcControllerBtn" class="ghost pcControllerButton" title="Gerenciar PC Controller"><span>PC-Controller</span><i id="pcControllerDot" aria-hidden="true"></i></button>
+            <button id="usageBtn" class="ghost" hidden aria-hidden="true" tabindex="-1">
               ◔ Uso · <span id="cost">US$ 0,0000</span>
             </button>
             <button id="discoverBtn" class="ghost">↻ Recursos</button>
@@ -47,15 +55,15 @@
         </header>
         <div id="chat" class="chat">
           <div class="welcome">
-            <div class="biglogo">✦</div>
-            <h2>Seu Claude continua aqui.</h2>
+            <div class="biglogo"><img src="/noctan-mark.png" alt="" /></div>
+            <h2>Seu trabalho continua aqui.</h2>
             <p>
               Continue pelo Vault, CLAUDE.md e cadernos vivos quando o uso do
-              Claude normal acabar.
+              serviço principal ficar indisponível.
             </p>
             <div class="suggestions">
               <button
-                data-prompt="Leia o CHATGPT_PREINSTRUCTION.md, localize o caderno vivo correto, confirme o estado real do workspace e continue exatamente de onde o trabalho parou. Antes de alterar qualquer coisa, resuma o que já foi feito, o que não deve ser repetido e o próximo passo."
+            data-prompt="Leia o CHATGPT_PREINSTRUCTION.md, localize o caderno vivo correto, confirme o estado real do workspace e continue exatamente de onde o trabalho parou. Antes de alterar qualquer coisa, resuma o que j&aacute; foi feito, o que n&atilde;o deve ser repetido e o pr&oacute;ximo passo."
               >
                 Continuar do Vault</button
               ><button
@@ -63,7 +71,7 @@
               >
                 Analisar workspace</button
               ><button
-                data-prompt="Liste os MCPs e ferramentas disponíveis nesta sessão."
+            data-prompt="Liste os MCPs e ferramentas dispon&iacute;veis nesta sess&atilde;o."
               >
                 Verificar MCPs
               </button>
@@ -72,39 +80,57 @@
         </div>
         <div class="composer">
           <div id="pending" class="pending" hidden></div>
-          <textarea
+          <div id="attachmentTray" class="attachmentTray" hidden></div>
+          <div class="promptShell"><textarea
             id="prompt"
             rows="2"
-            placeholder="Peça qualquer tarefa ao Claude X... (Ctrl+Enter para enviar)"
-          ></textarea>
+            placeholder="Peça sua tarefa ao Noctan... (Enter envia · Shift+Enter nova linha)"
+          ></textarea><button id="send" class="primary sendInside" aria-label="Enviar mensagem" title="Enviar mensagem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button></div>
+          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+          <div id="liveVoiceBar" class="liveVoiceBar" hidden aria-live="polite">
+          <button type="button" id="voiceCancel" class="voiceCancel" title="Descartar grava&ccedil;&atilde;o" aria-label="Descartar grava&ccedil;&atilde;o"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            <div id="voiceWave" class="voiceWave" aria-label="Ondas de áudio em tempo real"></div>
+            <span id="voiceTimer" class="voiceTimer">00:00</span>
+            <button type="button" id="voiceFinish" class="voiceFinish" title="Finalizar ditado" aria-label="Finalizar ditado"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+          </div>
           <div class="composeFoot">
-            <span id="runStatus">Aguardando mensagem</span>
+            <div class="composerTools">
+              <button id="attachImage" class="iconButton" title="Anexar imagem" aria-label="Anexar imagem">+</button>
+              <div class="micControl">
+                <button id="dictate" class="iconButton micButton" title="Falar e transcrever" aria-label="Falar e transcrever">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3M8 22h8"/></svg>
+                </button>
+                <button id="micMenuBtn" class="micArrow" title="Escolher microfone" aria-label="Escolher microfone">&#8964;</button>
+                <section id="micPopover" class="compactPopover micPopover" hidden>
+                  <small>Microfone</small>
+                  <div id="micDevices"><span class="micHint">Carregando...</span></div>
+                  <div class="recordToggle"><span>Clique para ouvir até enviar</span></div>
+                </section>
+              </div>
+              <span id="runStatus">Aguardando mensagem</span>
+            </div>
             <div class="footerActions">
               <button id="modelBtn" class="footerControl">
                 <span id="modelBtnLabel">Sonnet 5.5</span>
                 <span id="effortLabel">Médio</span>
               </button>
-              <button
-                id="usageDot"
-                class="usageDot"
-                aria-label="Ver uso"
-              ></button>
-              <button id="cancel" class="ghost" hidden>Parar</button
-              ><button id="send" class="primary">Enviar ↗</button>
+
+              <button id="usageDot" class="usageDot" hidden aria-hidden="true" tabindex="-1"></button><button id="cancel" class="ghost" hidden>Parar</button
+              >
             </div>
           </div>
           <section id="modelPopover" class="compactPopover modelPopover" hidden>
-            <small>Modelo · esta sessão</small>
-            <button class="choice" data-model="opus">
+                <small>Modelo &middot; esta sess&atilde;o</small>
+            <button class="choice anthropicModel" data-model="opus">
               <span>Opus 5.5</span><b class="check">✓</b>
             </button>
-            <button class="choice" data-model="fable">
+            <button class="choice anthropicModel" data-model="fable">
               <span>Fable 5.1</span><b class="check">✓</b>
             </button>
-            <button class="choice" data-model="sonnet">
+            <button class="choice anthropicModel" data-model="sonnet">
               <span>Sonnet 5.5</span><b class="check">✓</b>
             </button>
-            <button class="choice" data-model="haiku">
+            <button class="choice anthropicModel" data-model="haiku">
               <span>Haiku 5.5</span><b class="check">✓</b>
             </button>
             <div class="separator"></div>
@@ -120,7 +146,7 @@
               <span class="disabledSwitch"></span>
             </div>
           </section>
-          <section id="usagePopover" class="compactPopover usagePopover" hidden>
+          <section id="usagePopover" class="compactPopover usagePopover" hidden aria-hidden="true">
             <div class="popoverTitle"><strong>Uso</strong><span>⚙</span></div>
             <div class="usageLine">
               <strong>Limite desta tarefa</strong
@@ -149,10 +175,7 @@
           <h2>Configurações do agente</h2>
           <button id="closeSettings" class="ghost">✕</button>
         </div>
-        <p class="hint">
-          As configurações ficam somente neste PC. A chave da API é informada no
-          assistente Conectar tudo e nunca é salva em disco.
-        </p>
+          <p class="hint">As configura&ccedil;&otilde;es s&atilde;o locais e a API Key fica criptografada pelo Windows.</p>
         <label
           >Workspace (caminho absoluto)<input
             id="workspace"
@@ -162,24 +185,8 @@
             id="vault"
             placeholder="C:\\Users\\...\\Documents\\AI_Memory_Vault"
         /></label>
-        <div class="two">
-          <label>Modelo<input id="model" placeholder="sonnet" /></label
-          ><label
-            >Orçamento por tarefa (US$)<input
-              id="budget"
-              type="number"
-              min="0.05"
-              max="100"
-              step="0.05"
-          /></label>
-        </div>
+        <label>Modelo<input id="model" placeholder="sonnet" /></label>
         <label
-          >Máximo de turnos<input
-            id="turns"
-            type="number"
-            min="1"
-            max="100" /></label
-        ><label
           >Caminhos dos arquivos MCP JSON (um por linha)<textarea
             id="mcp"
             rows="3"
@@ -198,7 +205,7 @@
           >Instruções adicionais<textarea
             id="instructions"
             rows="3"
-            placeholder="Siga o caderno vivo e confirme alterações em produção."
+            placeholder="Siga o caderno vivo e confirme altera&ccedil;&otilde;es em produ&ccedil;&atilde;o."
           ></textarea>
         </label>
         <div id="discovery" class="discovery"></div>
@@ -212,13 +219,13 @@
       <section class="modal connectModal">
         <div class="modalHead">
           <div>
-            <span class="eyebrow">CONFIGURAÇÃO RÁPIDA</span>
-            <h2>Conectar o Claude X</h2>
+          <span class="eyebrow">CONFIGURA&Ccedil;&Atilde;O R\u00c1PIDA</span>
+            <h2>Conectar o Noctan</h2>
           </div>
           <button id="closeConnect" class="ghost">✕</button>
         </div>
         <p class="hint">
-          Uma vez conectado, o Claude X usa suas configurações locais do Claude
+          Uma vez conectado, o Noctan usa suas configurações locais da API Claude
           para trabalhar em qualquer projeto.
         </p>
         <div class="integrationGrid">
@@ -226,11 +233,14 @@
             <span>Claude API</span><strong id="apiState">Pendente</strong>
           </div>
           <div class="integration">
+            <span>PC Controller</span><strong id="tunnelState">Pendente</strong>
+          </div>
+          <div class="integration">
             <span>Vault e memória</span
             ><strong id="vaultState">Detectado</strong>
           </div>
           <div class="integration">
-            <span>MCPs e ferramentas</span
+            data-prompt="Liste os MCPs e ferramentas dispon&iacute;veis nesta sess&atilde;o."
             ><strong id="mcpState">Detectados</strong>
           </div>
           <div class="integration">
@@ -240,20 +250,25 @@
         </div>
         <label
           >Chave da Anthropic API<input
-            id="apiKey"
+            id="anthropicApiKey"
             type="password"
             autocomplete="off"
             spellcheck="false"
             placeholder="sk-ant-••••••••••••••••"
         /></label>
-        <p class="privacy">
-          A chave é enviada somente para <strong>127.0.0.1</strong>, fica na
-          memória deste processo e some quando o Claude X é fechado.
-        </p>
+        <label
+          >Runtime API Key da OpenAI para o Secure Tunnel<input
+            id="tunnelRuntimeKey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Cole uma vez; o Windows protege a chave"
+        /></label>
+          <p class="privacy">A chave fica protegida pela criptografia do Windows e n&atilde;o precisa ser inserida novamente a cada abertura.</p>
         <div class="oauthNote">
           <strong>Google e outros serviços</strong
           ><span
-            >São acessados pelos MCPs já instalados. Cada serviço pode pedir
+            >S&atilde;o acessados pelos MCPs j&aacute; instalados. Cada servi&ccedil;o pode pedir
             login próprio quando for usado pela primeira vez.</span
           >
         </div>
@@ -262,6 +277,28 @@
           <button id="openAdvanced" class="ghost">Ver detalhes</button
           ><button id="connectAll" class="primary">Conectar tudo</button>
         </div>
+      </section>
+    </div>
+    <div id="officialCreditsModal" class="overlay" hidden>
+      <section class="modal officialCreditsModal">
+        <div class="modalHead">
+        <div><h2>Cr&eacute;ditos oficiais da Anthropic</h2><p class="hint">Sess&atilde;o oficial isolada. O Noctan n&atilde;o recebe sua senha.</p></div>
+          <button id="closeOfficialCredits" class="ghost">&times;</button>
+        </div>
+        <div class="creditsActions">
+          <button type="button" id="creditsLogin" class="ghost">Entrar com Google no navegador</button>
+          <button type="button" id="creditsReload" class="ghost">Atualizar painel</button>
+          <span id="creditsHelp" class="hint">O navegador e o painel interno podem usar sess&otilde;es diferentes.</span>
+        </div>
+        <div id="creditsBrowserFallback" class="creditsBrowserFallback" hidden>
+          O painel integrado funciona apenas no aplicativo instalado. Para visualizar seus créditos neste navegador, abra o Claude Console.
+          <a href="https://platform.claude.com/settings/billing" target="_blank" rel="noopener noreferrer">Abrir Claude Console</a>
+        </div>
+        <webview
+          id="officialCreditsView"
+          src="https://platform.claude.com/usage"
+          partition="persist:noctan-claude-console"
+        ></webview>
       </section>
     </div>
     <script type="module" src="/app.js"></script>

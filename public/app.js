@@ -6,17 +6,36 @@ let state = {
   current: null,
   running: false,
   cost: 0,
+  attachments: [],
+  provider: "anthropic",
+  editReplayIndex: null,
 };
+let sentPrompts = [];
+let promptHistoryIndex = -1;
+let promptDraft = "";
+function resetPromptNavigation() {
+  promptHistoryIndex = -1;
+  promptDraft = "";
+}
+function sessionPrompts(session) {
+  return (session?.messages || []).filter(m => m.role === "user" && m.text)
+    .map(m => m.text).reverse().slice(0,100);
+}
+function setPromptHistory(session) {
+  sentPrompts = sessionPrompts(session);
+  resetPromptNavigation();
+}
 const request = async (url, options = {}) => {
   const r = await fetch(url, {
     ...options,
     headers: { "content-type": "application/json", ...(options.headers || {}) },
   });
   const j = await r.json();
-  if (!r.ok) throw Error(j.error || "Erro na solicitação");
+  if (!r.ok) throw Error(j.error || "Erro na solicita\u00e7\u00e3o");
   return j;
 };
 const show = (el, yes) => (el.hidden = !yes);
+let stopDictationForSend = async () => {};
 const escapeHtml = (value) =>
   value.replace(
     /[&<>"']/g,
@@ -94,22 +113,101 @@ function renderMarkdown(element, text) {
   closeList();
   element.innerHTML = html;
 }
-function message(role, text) {
+function message(role, text, attachmentCount = 0, messageIndex = null) {
   const e = document.createElement("div");
   e.className = "message " + role;
   e.rawText = text;
   if (role === "assistant") renderMarkdown(e, text);
-  else e.textContent = text;
+  else {
+    const body = document.createElement("div");
+    body.className = "messageText";
+    body.textContent = text;
+    e.append(body);
+    if (role === "user" && Number.isInteger(messageIndex)) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "messageEdit";
+      edit.title = "Editar mensagem";
+      edit.setAttribute("aria-label", "Editar mensagem");
+      edit.textContent = "✎";
+      edit.onclick = (event) => { event.stopPropagation(); editUserMessage(messageIndex, text); };
+      e.append(edit);
+    }
+    if (attachmentCount > 0) {
+      const summary = document.createElement("div");
+      summary.className = "messageAttachments";
+      summary.textContent = attachmentCount + (attachmentCount === 1 ? " imagem anexada" : " imagens anexadas");
+      e.append(summary);
+    }
+  }
   $("chat").append(e);
   $("chat").scrollTop = $("chat").scrollHeight;
   return e;
 }
-function note(text) {
-  const e = document.createElement("div");
-  e.className = "tool";
-  e.textContent = text;
-  $("chat").append(e);
-  $("chat").scrollTop = $("chat").scrollHeight;
+async function editUserMessage(index, currentText) {
+  if (state.running) { alert("Aguarde a execução atual terminar para editar essa mensagem."); return; }
+  if (!state.current) return;
+  const next = window.prompt("Editar mensagem:", currentText);
+  if (next === null || !next.trim() || next.trim() === currentText.trim()) return;
+  await request("/api/sessions/" + encodeURIComponent(state.current) + "/messages/" + index, {
+    method: "PATCH", body: JSON.stringify({ text: next.trim() })
+  });
+  state.editReplayIndex = index;
+  await loadSession(state.current);
+  $("prompt").value = next.trim();
+  await send();
+}
+function note(text) { if(progressUI) addProgressEvent(text); else message("system",text); }
+function renderAttachments() {
+  const tray = $("attachmentTray");
+  tray.replaceChildren();
+  for (const [index, item] of state.attachments.entries()) {
+    const card = document.createElement("div");
+    card.className = "attachmentCard";
+    const image = document.createElement("img");
+    image.src = item.dataUrl;
+    image.alt = item.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "\u00d7";
+    remove.title = "Remover imagem";
+    remove.onclick = () => {
+      state.attachments.splice(index, 1);
+      renderAttachments();
+    };
+    card.append(image, remove);
+    tray.append(card);
+  }
+  show(tray, state.attachments.length > 0);
+}
+
+async function addImages(files) {
+  const accepted = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+  for (const file of [...files].slice(0, 5 - state.attachments.length)) {
+    if (!accepted.includes(file.type)) continue;
+    if (file.size > 8_000_000) {
+      message("system", file.name + " \u00e9 maior que 8 MB.");
+      continue;
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    state.attachments.push({ name: file.name || "imagem", dataUrl });
+  }
+  renderAttachments();
+}
+async function deleteSession(id, title) {
+  if (state.running && state.current === id) {
+    alert("Pare a execu\u00e7\u00e3o antes de apagar esta conversa.");
+    return;
+  }
+  if (!confirm('Apagar a conversa "' + title + '"?')) return;
+  await request("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" });
+  if (state.current === id) newSession();
+  await refresh();
 }
 function updateSessions() {
   const el = $("sessions");
@@ -118,34 +216,118 @@ function updateSessions() {
   for (const s of state.sessions.filter(
     (item) => !term || item.title.toLowerCase().includes(term),
   )) {
+    const row = document.createElement("div");
+    row.className = "sessionRow" + (state.current === s.id ? " active" : "");
     const b = document.createElement("button");
-    b.className = "session" + (state.current === s.id ? " active" : "");
-    b.textContent = "▤ " + s.title;
+    b.className = "session";
+    b.textContent = "💬 " + s.title;
     b.onclick = () => loadSession(s.id);
-    el.append(b);
+    const del = document.createElement("button");
+    del.className = "sessionDelete";
+    del.type = "button";
+    del.title = "Apagar conversa";
+    del.setAttribute("aria-label", "Apagar conversa");
+    del.textContent = "×";
+    del.onclick = (event) => {
+      event.stopPropagation();
+      deleteSession(s.id, s.title).catch(error => alert(error.message));
+    };
+    row.append(b, del);
+    el.append(row);
   }
+}
+function totalLocalSpend() {
+  return state.sessions.reduce(
+    (sum, session) =>
+      sum +
+      (session.messages || []).reduce(
+        (subtotal, item) => subtotal + (item.costUsd || 0),
+        0,
+      ),
+    0,
+  );
+}
+function updateCreditBalance() {
+  $("creditBalance").textContent = "Ver na Anthropic";
+}
+function providerModel() {
+  return state.config.anthropicModel || state.config.model || "sonnet";
+}
+function updateProviderUI() {
+  $("modelBtnLabel").textContent = modelLabel(providerModel());
+  $("sidebarCredits").title = "Abrir cr\u00e9ditos oficiais da Anthropic";
+}
+function updateTunnelUI() {
+  const pc = state.discovery?.pcController || {};
+  const tunnelState = pc.status || "stopped";
+  const localState = pc.localState || (pc.localMcpConfigured ? "idle" : "unconfigured");
+  const tunnelConnected = tunnelState === "connected";
+  const localConnected = Boolean(pc.localConnected);
+  const busy = ["connecting", "stopping"].includes(tunnelState) || ["connecting", "stopping"].includes(localState);
+  const connected = tunnelConnected && localConnected;
+  const failed = !busy && (!tunnelConnected || !localConnected);
+  $("pcControllerDot").className = busy ? "connecting" : connected ? "connected" : failed ? "error" : "";
+  $("pcControllerBtn").classList.toggle("connected", connected);
+  $("pcControllerBtn").title = connected
+    ? `PC Controller conectado  -  ${pc.localToolCount || 0} ferramentas`
+    : busy ? "PC Controller conectando..."
+      : (pc.lastError || pc.localLastError || pc.message || pc.localMessage || "PC Controller desconectado - clique para reconectar");
+}
+async function refreshPcControllerHealth() {
+  if (!state.discovery) return;
+  try {
+    const local = await request("/api/pc-controller/status");
+    const pc = state.discovery.pcController ||= {};
+    pc.localState = local.state;
+    pc.localConnected = Boolean(local.connected);
+    pc.localMessage = local.message;
+    pc.localToolCount = local.toolCount || 0;
+    pc.localLastOkAt = local.lastOkAt || null;
+    pc.localLastError = local.lastError || null;
+  } catch (error) {
+    const pc = state.discovery.pcController ||= {};
+    pc.localState = "error";
+    pc.localConnected = false;
+    pc.localLastError = error.message;
+  }
+  updateTunnelUI();
+  updateConnectState();
 }
 async function refresh() {
   const d = await request("/api/status");
   state.config = d.config;
+  if (!micServerPreferenceInitialized && d.config.microphoneId && d.config.microphoneId !== "default") {
+    selectedMicId = d.config.microphoneId;
+    selectedMicLabel = d.config.microphoneLabel || "";
+    localStorage.setItem("noctan.microphone", selectedMicId);
+    localStorage.setItem("noctan.microphoneLabel", selectedMicLabel);
+  }
+  micServerPreferenceInitialized = true;
   state.discovery = d.discovery;
   state.sessions = await request("/api/sessions");
-  $("connection").textContent = d.discovery.apiKeyConfigured
-    ? "● Tudo conectado"
-    : "○ Conexão pendente";
-  $("connection").style.color = d.discovery.apiKeyConfigured
+  // Session-specific history: never include prompts from other conversations.
+  if (state.current) {
+    const currentSession = state.sessions.find(s => s.id === state.current);
+    if (currentSession && promptHistoryIndex < 0) sentPrompts = sessionPrompts(currentSession);
+  }
+  const selectedConnected = Boolean(d.discovery.providerKeys?.anthropic);
+  $("connection").textContent = selectedConnected
+    ? "\u2713 Tudo conectado"
+    : "\u2022 Conex\u00e3o pendente";
+  $("connection").style.color = selectedConnected
     ? "#3f8f63"
     : "#b56b36";
   $("workspaceLabel").textContent =
     d.config.workspace || "Configure seu workspace";
-  $("modelBtnLabel").textContent = modelLabel(d.config.model || "sonnet");
+  updateProviderUI();
+  updateTunnelUI();
   $("effortLabel").textContent = effortLabel(d.config.effort || "medium");
   document
     .querySelectorAll("[data-model]")
     .forEach((button) =>
       button.classList.toggle(
         "selected",
-        button.dataset.model === d.config.model,
+        button.dataset.model === providerModel(),
       ),
     );
   document
@@ -157,41 +339,46 @@ async function refresh() {
       ),
     );
   updateSessions();
+  updateCreditBalance();
   updateConnectState();
 }
 async function loadSession(id) {
   if (state.running) return;
   state.current = id;
   const s = await request("/api/sessions/" + id);
+  state.provider = "anthropic";
+  updateProviderUI();
+  setPromptHistory(s);
+  $("prompt").value = "";
   $("conversationTitle").textContent = s.title;
   $("chat").replaceChildren();
   let cost = 0;
-  for (const m of s.messages) {
-    message(m.role, m.text);
+  for (const [index, m] of s.messages.entries()) {
+    message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, index);
     cost += m.costUsd || 0;
   }
   state.cost = cost;
   updateCost();
   updateSessions();
+  if (s.pendingPrompt && !state.running) {
+    history.replaceState({}, "", "/");
+    $("prompt").value = s.pendingPrompt;
+    await send();
+  }
 }
 function updateCost() {
-  $("cost").textContent = "US$ " + state.cost.toFixed(4) + " nesta conversa";
+  if ($("cost")) $("cost").textContent = "";
   updateUsageIndicator();
 }
-function updateUsageIndicator() {
-  const budget = Number(state.config?.maxBudgetUsd || 0.25);
-  const percent = Math.min(100, budget ? (state.cost / budget) * 100 : 0);
-  const color =
-    percent >= 90 ? "#dc4c4c" : percent >= 65 ? "#e1ac3c" : "#4285e1";
-  $("usageDot").style.setProperty(
-    "--usage",
-    Math.max(18, percent * 3.6) + "deg",
-  );
-  $("usageDot").style.setProperty("--usage-color", color);
-  $("usageDot").title =
-    percent.toFixed(percent < 1 ? 1 : 0) + "% do limite desta tarefa";
+function updateUsageIndicator(){
+  const total=totalLocalSpend();
+  $("usageDot").style.setProperty("--usage",Math.max(20,Math.min(350,total*20))+"deg");
+  $("usageDot").style.setProperty("--usage-color","#4285e1");
+  if ($("usageDot")) $("usageDot").title="";
 }
 function modelLabel(value) {
+  if (value === "gpt-5.4") return "GPT-5.4";
+  if (value === "gpt-5.4-mini") return "GPT-5.4 mini";
   return value === "sonnet"
     ? "Sonnet 5.5"
     : value === "opus"
@@ -202,29 +389,13 @@ function modelLabel(value) {
           ? "Haiku 5.5"
           : value;
 }
-function effortLabel(value) {
-  return { low: "Baixo", medium: "Médio", high: "Alto" }[value] || "Médio";
-}
-function updateUsagePopover() {
-  const total = state.sessions.reduce(
-    (sum, session) =>
-      sum +
-      (session.messages || []).reduce(
-        (subtotal, message) => subtotal + (message.costUsd || 0),
-        0,
-      ),
-    0,
-  );
-  const budget = Number(state.config.maxBudgetUsd || 0.25);
-  const percent = Math.min(100, budget ? (state.cost / budget) * 100 : 0);
-  $("usageTotal").textContent = "US$ " + total.toFixed(4);
-  $("usagePercent").textContent =
-    percent.toFixed(percent < 1 ? 1 : 0) + "% usado";
-  $("usageFill").style.width = percent + "%";
-  $("usageFill").style.background =
-    percent >= 90 ? "#dc4c4c" : percent >= 65 ? "#e1ac3c" : "#4285e1";
-  $("usageBudgetLine").textContent =
-    "US$ " + state.cost.toFixed(4) + " de US$ " + budget.toFixed(2);
+function effortLabel(value) { return {low:"Baixo",medium:"M\u00e9dio",high:"Alto"}[value] || "M\u00e9dio"; }
+function updateUsagePopover(){
+  const total=totalLocalSpend();
+  $("usageTotal").textContent="US$ "+total.toFixed(4);
+  $("usagePercent").textContent="Sem limite por tarefa";
+  $("usageFill").style.width="0%";
+  $("usageBudgetLine").textContent="Nesta conversa: US$ "+state.cost.toFixed(4);
 }
 function togglePopover(id) {
   const target = $(id);
@@ -239,42 +410,92 @@ function togglePopover(id) {
 function newSession() {
   if (state.running) return;
   state.current = null;
+  setPromptHistory(null);
+  $("prompt").value = "";
   state.cost = 0;
   updateCost();
   $("conversationTitle").textContent = "Novo chat";
   $("chat").replaceChildren();
   const d = document.createElement("div");
   d.className = "welcome";
-  d.innerHTML =
-    '<div class="biglogo">✦</div><h2>Pronto para qualquer tarefa?</h2><p>O Claude X mantém o contexto do workspace e do Vault.</p>';
+  d.innerHTML = '<div class="biglogo"><img src="/noctan-mark.png" alt="" /></div><h2>Pronto para qualquer tarefa?</h2><p>O Noctan mant\u00e9m o contexto do workspace e do Vault.</p>';
   $("chat").append(d);
   updateSessions();
 }
-let thinkingTimer = null;
-const thinkingMessages = [
-  "Pensando...",
-  "Lendo o contexto...",
-  "Organizando as ideias...",
-  "Consultando o Vault...",
-  "Clauding...",
-  "Descombobulando...",
-];
-function setRunning(value) {
-  state.running = value;
-  $("send").disabled = value;
-  show($("cancel"), value);
-  clearInterval(thinkingTimer);
-  thinkingTimer = null;
-  if (value) {
-    let index = 0;
-    $("runStatus").textContent = thinkingMessages[index];
-    thinkingTimer = setInterval(() => {
-      index = (index + 1) % thinkingMessages.length;
-      $("runStatus").textContent = thinkingMessages[index];
-    }, 2200);
-  } else {
-    $("runStatus").textContent = "Aguardando mensagem";
+let progressUI=null;
+let progressStarted=0;
+let progressTicker=null;
+const thinkingMessages=["Pensando...","Lendo o contexto...","Organizando as ideias...","Consultando o Vault...","Conectando ferramentas...","Descombobulando..."];
+function formatElapsed(seconds){
+  if(seconds<60)return seconds+"s";
+  const minutes=Math.floor(seconds/60);
+  const rest=seconds%60;
+  return minutes+"m "+String(rest).padStart(2,"0")+"s";
+}
+function keepProgressLast(){
+  if(!progressUI)return;
+  const chat=$("chat");
+  if(progressUI.details.parentElement===chat && chat.lastElementChild!==progressUI.details){
+    chat.append(progressUI.details);
   }
+  chat.scrollTop=chat.scrollHeight;
+}
+function progressHeadline(){
+  if(!progressUI)return;
+  const seconds=Math.floor((Date.now()-progressStarted)/1000);
+  const randomLabel=thinkingMessages[Math.floor(seconds/3)%thinkingMessages.length];
+  progressUI.headline.textContent=(progressUI.realStatus || randomLabel)+"  -  "+formatElapsed(seconds);
+}
+function beginProgress(){
+  progressStarted=Date.now();
+  const details=document.createElement("details");
+  details.className="agentProgress";
+  const summary=document.createElement("summary");
+  const icon=document.createElement("img");
+  icon.className="agentSpinner";
+  icon.src="/noctan-mark.png";
+  icon.alt="";
+  const headline=document.createElement("span");
+  summary.append(icon,headline);
+  const log=document.createElement("div");
+  log.className="agentProgressLog";
+  details.append(summary,log);
+  $("chat").append(details);
+  progressUI={details,summary,headline,log,realStatus:""};
+  addProgressEvent(
+    state.provider === "openai"
+      ? "Conectando \u00e0 OpenAI Responses API"
+      : "Conectando ao Claude Agent SDK",
+  );
+  clearInterval(progressTicker);
+  progressHeadline();
+  progressTicker=setInterval(progressHeadline,650);
+  $("chat").scrollTop=$("chat").scrollHeight;
+}
+function addProgressEvent(text){
+  if(!progressUI)return;
+  const item=document.createElement("div");
+  item.textContent=new Date().toLocaleTimeString("pt-BR")+"  -  "+text;
+  progressUI.log.append(item);
+  if(progressUI.log.childElementCount>120)progressUI.log.firstElementChild.remove();
+}
+function updateProgress(text){
+  if(!progressUI)return;
+  progressUI.realStatus=/ferramenta|autoriza\u00e7\u00e3o|Erro|Falha/i.test(text)?text:"";
+  addProgressEvent(text);
+  progressHeadline();
+}
+function endProgress(){
+  clearInterval(progressTicker);
+  progressTicker=null;
+  if(progressUI)progressUI.details.remove();
+  progressUI=null;
+}
+function setRunning(value){
+  state.running=value;
+  $("send").disabled=false;
+  show($("cancel"),value);
+  $("runStatus").textContent=value?"Agente em execu\u00e7\u00e3o":"Aguardando mensagem";
 }
 async function approve(id, allow) {
   await request("/api/approve", {
@@ -287,7 +508,7 @@ function approval(a) {
   const p = $("pending");
   p.replaceChildren();
   const title = document.createElement("strong");
-  title.textContent = "Permissão solicitada: " + a.tool;
+  title.textContent = "Permiss\u00e3o solicitada: " + a.tool;
   p.append(title);
   const pre = document.createElement("pre");
   pre.textContent = JSON.stringify(a.input, null, 2).slice(0, 6000);
@@ -304,23 +525,54 @@ function approval(a) {
   show(p, true);
 }
 async function send() {
+  await stopDictationForSend();
   const prompt = $("prompt").value.trim();
-  if (!prompt || state.running) return;
+  if (!prompt && !state.attachments.length) return;
+  if (state.running && state.current) {
+    if (!prompt) { message("system", "Envie texto no follow-up enquanto a execução está ativa."); return; }
+    if (state.attachments.length) { message("system", "Imagens serão enviadas quando a execução atual terminar."); return; }
+    if (prompt) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
+    resetPromptNavigation();
+    $("prompt").value = "";
+    message("user", prompt);
+    keepProgressLast();
+    try {
+      await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
+      addProgressEvent("Nova mensagem enviada ao agente durante a execução.");
+    } catch (error) {
+      message("system", error.message);
+    }
+    return;
+  }
+  if (prompt) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
+  resetPromptNavigation();
+  const attachments = [...state.attachments];
+  const replayEditIndex = Number.isInteger(state.editReplayIndex) ? state.editReplayIndex : null;
   $("prompt").value = "";
+  state.attachments = [];
+  renderAttachments();
   if (!state.current) {
     $("chat").replaceChildren();
-    $("conversationTitle").textContent = prompt.slice(0, 65);
+    $("conversationTitle").textContent = (prompt || "Imagem anexada").slice(0, 65);
   }
-  message("user", prompt);
+  if (replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
   setRunning(true);
+  beginProgress();
   let response = null;
   let assistant = null;
   try {
     response = await fetch("/api/run", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, sessionId: state.current }),
+      body: JSON.stringify({
+        prompt,
+        attachments,
+        sessionId: state.current,
+        provider: state.provider,
+        editReplayIndex: replayEditIndex,
+      }),
     });
+    state.editReplayIndex = null;
     if (!response.ok) {
       const j = await response.json();
       throw Error(j.error || "Erro");
@@ -347,37 +599,49 @@ async function send() {
         }
         if (type === "start") {
           state.current = data.sessionId;
-          updateSessions();
+          await refresh();
+          updateProgress("Preparando execu\u00e7\u00e3o");
         }
         if (type === "text") {
+          updateProgress("Respondendo");
           if (!assistant) assistant = message("assistant", "");
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);
-          $("chat").scrollTop = $("chat").scrollHeight;
+          keepProgressLast();
         }
-        if (type === "tool")
-          note(
-            "⚙ " + data.name + " · " + JSON.stringify(data.input).slice(0, 450),
-          );
+        if (type === "tool") {
+          keepProgressLast();
+          updateProgress("Usando ferramenta: "+String(data.name || "ferramenta"));
+          addProgressEvent(JSON.stringify(data.input || {}).slice(0,600));
+        }
+        if (type === "init") {
+          keepProgressLast();
+          updateProgress("Agente inicializado");
+          addProgressEvent("Ferramentas dispon\u00edveis: "+(data.tools || []).length);
+        }
+        if (type === "approval") updateProgress("Aguardando autoriza\u00e7\u00e3o");
         if (type === "approval") approval(data);
         if (type === "result") {
           state.cost += data.costUsd || 0;
           updateCost();
-          note(
-            "Execução: " +
-              data.subtype +
-              " · US$ " +
-              (data.costUsd || 0).toFixed(4),
-          );
+          updateProgress("Execu\u00e7\u00e3o conclu\u00edda");
+          addProgressEvent("Resultado: "+data.subtype+" · US$ "+(data.costUsd || 0).toFixed(4));
         }
+        if (type === "done") updateProgress("Concluído");
+        if (type === "error") updateProgress("Erro na execu\u00e7\u00e3o");
+        if (type === "notice") addProgressEvent(String(data.text || ""));
         if (type === "error") message("system", data.error);
-        if (type === "notice") note(data.text);
+
       }
     }
     await refresh();
   } catch (e) {
+    updateProgress("Falha na execu\u00e7\u00e3o");
+    addProgressEvent(e.message);
     message("system", e.message);
   } finally {
+    endProgress();
+    await refresh().catch(() => {});
     setRunning(false);
     show($("pending"), false);
   }
@@ -393,8 +657,6 @@ function populate() {
   $("workspace").value = c.workspace || "";
   $("vault").value = c.vault || "";
   $("model").value = c.model || "";
-  $("budget").value = c.maxBudgetUsd || 1;
-  $("turns").value = c.maxTurns || 15;
   $("mcp").value = (c.mcpConfigPaths || []).join("\n");
   $("plugins").value = (c.pluginPaths || []).join("\n");
   $("extra").value = (c.additionalDirectories || []).join("\n");
@@ -419,26 +681,58 @@ function displayDiscovery() {
 }
 function updateConnectState() {
   const d = state.discovery || {};
-  $("apiState").textContent = d.apiKeyConfigured ? "Conectada" : "Pendente";
-  $("apiState").className = d.apiKeyConfigured ? "ok" : "warn";
+  const anthropicConnected = Boolean(d.providerKeys?.anthropic);
+  $("apiState").textContent = anthropicConnected ? "Conectada" : "Pendente";
+  $("apiState").className = anthropicConnected ? "ok" : "warn";
+  const tunnel = d.pcController || {};
+  const pcLocalConnected = Boolean(tunnel.localConnected);
+  const pcLocalState = tunnel.localState || (tunnel.localMcpConfigured ? "idle" : "unconfigured");
+  $("tunnelState").textContent = pcLocalConnected
+    ? "PC Controller conectado"
+    : ["connecting", "stopping"].includes(pcLocalState) ? "Conectando..."
+      : pcLocalState === "error" ? "Desconectado / erro"
+        : tunnel.localMcpConfigured ? "Configurado, desconectado"
+          : tunnel.status === "connected" ? "Tunnel conectado" : "Pendente";
+  $("tunnelState").className = (pcLocalConnected || tunnel.status === "connected") ? "ok" : "warn";
   $("vaultState").textContent =
-    d.vaultExists || d.vaultCandidates?.length ? "Conectado" : "Não encontrado";
+    d.vaultExists || d.vaultCandidates?.length ? "Conectado" : "N\u00e3o encontrado";
   $("mcpState").textContent = d.mcpConfigs?.length
     ? d.mcpConfigs.length + " fontes"
-    : "Não encontrados";
+    : "NÃ£o encontrados";
   $("pluginState").textContent = d.pluginRoot
     ? "Conectados"
-    : "Não encontrados";
+    : "NÃ£o encontrados";
 }
 function openConnect() {
   updateConnectState();
-  $("apiKey").value = "";
+  $("anthropicApiKey").value = "";
+  $("tunnelRuntimeKey").value = "";
   $("connectError").textContent = "";
   show($("connectError"), false);
   show($("connectModal"), true);
-  $("apiKey").focus();
+  $("anthropicApiKey").focus();
 }
 $("connectBtn").onclick = openConnect;
+$("newWindow").onclick = () =>
+  window.open("/", "_blank");
+$("pcControllerBtn").onclick = async () => {
+  const button = $("pcControllerBtn");
+  const dot = $("pcControllerDot");
+  dot.className = "connecting";
+  button.classList.remove("connected");
+  button.title = "Reconectando PC Controller...";
+  try {
+    await request("/api/tunnel/connect", { method: "POST", body: JSON.stringify({ autoStart: true }) });
+    await request("/api/pc-controller/connect", { method: "POST", body: "{}" });
+    await refreshPcControllerHealth();
+  } catch (error) {
+    const current = state.discovery?.pcController || {};
+    current.status = "error";
+    current.localState = "error";
+    current.lastError = error.message;
+    updateTunnelUI();
+  }
+};
 $("sessionSearch").oninput = updateSessions;
 $("projectBtn").onclick = () => $("discoverBtn").click();
 $("usageBtn").onclick = (event) => {
@@ -455,12 +749,24 @@ $("modelBtn").onclick = (event) => {
 };
 $("modelPopover").onclick = (event) => event.stopPropagation();
 $("usagePopover").onclick = (event) => event.stopPropagation();
+$("micPopover").onclick = (event) => event.stopPropagation();
 document.querySelectorAll("[data-model]").forEach((button) => {
   button.onclick = async () => {
+    const previous = providerModel();
+    const nextModel = button.dataset.model;
+    if (previous === nextModel) { show($("modelPopover"), false); return; }
     await request("/api/config", {
       method: "PUT",
-      body: JSON.stringify({ ...state.config, model: button.dataset.model }),
+      body: JSON.stringify({ ...state.config, anthropicModel: nextModel, model: nextModel }),
     });
+    const noticeText = "Modelo alterado para " + modelLabel(nextModel) + (state.running ? " — passa a valer no próximo turno." : ".");
+    if (state.current) {
+      await request("/api/sessions/" + encodeURIComponent(state.current) + "/notice", {
+        method: "POST", body: JSON.stringify({ text: noticeText, kind: "model-change", model: nextModel })
+      }).catch(() => {});
+    }
+    message("system", noticeText);
+    keepProgressLast();
     show($("modelPopover"), false);
     await refresh();
   };
@@ -477,27 +783,75 @@ document.querySelectorAll("[data-effort]").forEach((button) => {
 document.addEventListener("click", () => {
   show($("modelPopover"), false);
   show($("usagePopover"), false);
+  show($("micPopover"), false);
 });
+
+document.querySelectorAll(".overlay").forEach((overlay) => {
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) show(overlay, false);
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  document.querySelectorAll(".overlay:not([hidden])").forEach((overlay) =>
+    show(overlay, false),
+  );
+});
+
 $("closeConnect").onclick = () => show($("connectModal"), false);
+$("sidebarCredits").onclick = (event) => {
+  event.stopPropagation();
+  show($("usagePopover"), false);
+  window.open("https://platform.claude.com/settings/billing", "_blank", "noopener,noreferrer");
+};
+
+$("closeOfficialCredits").onclick = () => show($("officialCreditsModal"), false);
+$("creditsLogin").onclick = () => window.open("https://platform.claude.com/settings/billing", "_blank", "noopener,noreferrer");
+$("creditsReload").onclick = () => {
+  const view = $("officialCreditsView");
+  if (typeof view?.reload === "function") view.reload();
+  else window.open("https://platform.claude.com/settings/billing", "_blank", "noopener,noreferrer");
+};
+
 $("openAdvanced").onclick = () => {
   show($("connectModal"), false);
   $("settingsBtn").click();
 };
 $("connectAll").onclick = async () => {
-  const key = $("apiKey").value.trim();
+  const anthropicKey = $("anthropicApiKey").value.trim();
+  const runtimeKey = $("tunnelRuntimeKey").value.trim();
   const button = $("connectAll");
   button.disabled = true;
   button.textContent = "Conectando...";
   show($("connectError"), false);
   try {
-    await request("/api/connect", {
-      method: "POST",
-      body: JSON.stringify({ key }),
-    });
+    if (
+      !anthropicKey &&
+      !runtimeKey &&
+      !state.discovery.providerKeys?.anthropic &&
+      !state.discovery.pcController?.localMcpConfigured &&
+      !state.discovery.pcController?.runtimeKeyConfigured
+    )
+      throw Error("Conecte a Anthropic ou configure o PC Controller local.");
+    if (anthropicKey)
+      await request("/api/connect", {
+        method: "POST",
+        body: JSON.stringify({ key: anthropicKey, provider: "anthropic" }),
+      });
+    if (runtimeKey || state.discovery.pcController?.runtimeKeyConfigured)
+      await request("/api/tunnel/connect", {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeKey,
+          autoStart: true,
+        }),
+      });
     await request("/api/autoconfigure", { method: "POST", body: "{}" });
-    $("apiKey").value = "";
+    $("anthropicApiKey").value = "";
+    $("tunnelRuntimeKey").value = "";
     await refresh();
-    button.textContent = "Conectado ✓";
+    button.textContent = "Conectado \u2713";
     setTimeout(() => show($("connectModal"), false), 650);
   } catch (e) {
     $("connectError").textContent = e.message;
@@ -532,8 +886,6 @@ $("saveSettings").onclick = async () => {
       workspace: $("workspace").value,
       vault: $("vault").value,
       model: $("model").value,
-      maxBudgetUsd: Number($("budget").value),
-      maxTurns: Number($("turns").value),
       mcpConfigPaths: lines("mcp"),
       pluginPaths: lines("plugins"),
       additionalDirectories: lines("extra"),
@@ -548,8 +900,533 @@ $("saveSettings").onclick = async () => {
 };
 $("new").onclick = newSession;
 $("send").onclick = send;
+$("attachImage").onclick = () => $("imageInput").click();
+$("imageInput").onchange = async (event) => {
+  await addImages(event.target.files);
+  event.target.value = "";
+};
+$("prompt").addEventListener("paste", async (event) => {
+  const images = [...event.clipboardData.files].filter((file) =>
+    file.type.startsWith("image/"),
+  );
+  if (images.length) {
+    event.preventDefault();
+    await addImages(images);
+  }
+});
+const composer = document.querySelector(".composer");
+for (const name of ["dragenter", "dragover"]) {
+  composer.addEventListener(name, (event) => {
+    event.preventDefault();
+    composer.classList.add("dragging");
+  });
+}
+for (const name of ["dragleave", "drop"]) {
+  composer.addEventListener(name, (event) => {
+    event.preventDefault();
+    composer.classList.remove("dragging");
+  });
+}
+composer.addEventListener("drop", async (event) => {
+  await addImages(event.dataTransfer.files);
+});
+
+let microphoneStream = null;
+let audioContext = null;
+let audioProcessor = null;
+let audioSource = null;
+let audioChunks = [];
+let selectedMicId = localStorage.getItem("noctan.microphone") || "default";
+let selectedMicLabel = localStorage.getItem("noctan.microphoneLabel") || "";
+let micServerPreferenceInitialized = false;
+function rememberMic(id, label) {
+ selectedMicId = id || "default"; selectedMicLabel = label || "";
+ localStorage.setItem("noctan.microphone", selectedMicId);
+ localStorage.setItem("noctan.microphoneLabel", selectedMicLabel);
+ request("/api/preferences/microphone", { method: "POST", body: JSON.stringify({ deviceId: selectedMicId, label: selectedMicLabel }) }).catch(() => {});
+}
+async function resolveMic() {
+ if (selectedMicId === "default") return;
+ const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+ if (!devices.some(d => d.deviceId === selectedMicId)) {
+  const found = devices.find(d => d.label && d.label === selectedMicLabel);
+  rememberMic(found?.deviceId || "default", found?.label || "");
+ }
+}
+
+async function listMicrophones() {
+  const container = $("micDevices");
+  container.replaceChildren();
+  try {
+    const permission = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    permission.getTracks().forEach((track) => track.stop());
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (device) => device.kind === "audioinput",
+    );
+    if (!devices.length) throw Error("Nenhum microfone encontrado");
+    for (const [index, device] of devices.entries()) {
+      const button = document.createElement("button");
+      button.className = "micChoice";
+      if (device.deviceId === selectedMicId) button.classList.add("selected");
+      button.textContent = device.label || `Microfone ${index + 1}`;
+      button.onclick = () => {
+        rememberMic(device.deviceId, device.label);
+        listMicrophones();
+      };
+      container.append(button);
+    }
+  } catch (error) {
+    const hint = document.createElement("span");
+    hint.className = "micHint";
+    hint.textContent = `Libere o microfone no Windows para listar os dispositivos. (${error.message})`;
+    container.append(hint);
+  }
+}
+
+$("micMenuBtn").onclick = async (event) => {
+  event.stopPropagation();
+  const opening = $("micPopover").hidden;
+  show($("modelPopover"), false);
+  show($("usagePopover"), false);
+  show($("micPopover"), opening);
+  if (opening) await listMicrophones();
+};
+
+function resampleAudio(chunks, sourceRate, targetRate = 16000) {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const source = new Float32Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    source.set(chunk, offset);
+    offset += chunk.length;
+  }
+  if (sourceRate === targetRate) return source;
+  const ratio = sourceRate / targetRate;
+  const output = new Float32Array(Math.floor(source.length / ratio));
+  for (let index = 0; index < output.length; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.max(start + 1, Math.floor((index + 1) * ratio));
+    let sum = 0;
+    for (let cursor = start; cursor < end && cursor < source.length; cursor += 1)
+      sum += source[cursor];
+    output[index] = sum / (end - start);
+  }
+  return output;
+}
+
+function pcmBase64(samples) {
+  const bytes = new Uint8Array(samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let index = 0; index < samples.length; index += 1) {
+    const value = Math.max(-1, Math.min(1, samples[index]));
+    view.setInt16(index * 2, value < 0 ? value * 32768 : value * 32767, true);
+  }
+  let binary = "";
+  for (let start = 0; start < bytes.length; start += 32768)
+    binary += String.fromCharCode(...bytes.subarray(start, start + 32768));
+  return btoa(binary);
+}
+
+
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+let speechRecognition = null;
+let speechBase = "";
+let speechFinal = "";
+let speechActive = false;
+let speechStopPromise = null;
+let speechStopResolve = null;
+let speechLastError = "";
+
+function updateSpeechPrompt(interim = "") {
+  $("prompt").value = [speechBase, speechFinal, interim].filter(Boolean).join(" ").trim();
+}
+function finishSpeechSession() {
+  speechActive = false;
+  $("dictate").classList.remove("recording");
+  $("runStatus").textContent = speechLastError
+    ? "Ditado interrompido: " + speechLastError
+    : "Ditado conclu\u00eddo";
+  if (speechStopResolve) speechStopResolve();
+  speechStopResolve = null;
+  speechStopPromise = null;
+  speechRecognition = null;
+}
+async function startLegacyRecording() {
+  if ($("dictate").classList.contains("recording")) return;
+  if (SpeechRecognitionAPI && selectedMicId === "default") {
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "pt-BR";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    speechRecognition = recognition;
+    speechBase = $("prompt").value.trim();
+    speechFinal = "";
+    speechLastError = "";
+    speechActive = true;
+    recognition.onresult = (event) => {
+      let interim = "";
+      let confirmed = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const text = event.results[i][0]?.transcript?.trim() || "";
+        if (event.results[i].isFinal) confirmed += " " + text;
+        else interim += " " + text;
+      }
+      speechFinal = confirmed.trim();
+      updateSpeechPrompt(interim.trim());
+      $("runStatus").textContent = interim.trim() ? "Transcrevendo ao vivo..." : "Ouvindo...";
+    };
+    recognition.onerror = (event) => {
+      speechLastError = event.error || "indisponível";
+      if (event.error === "not-allowed" || event.error === "service-not-allowed" || event.error === "network") {
+        $("runStatus").textContent = "Reconhecimento ao vivo indisponível; tente o modo local";
+      }
+    };
+    recognition.onend = () => {
+      const failed = speechLastError && !speechFinal;
+      finishSpeechSession();
+      if (failed) $("runStatus").textContent = "Reconhecimento ao vivo indisponível. Use Chrome ou selecione outro microfone para o modo local.";
+    };
+    try {
+      recognition.start();
+      $("dictate").classList.add("recording");
+    $("runStatus").textContent = "Ouvindo... texto aparece enquanto voc\u00ea fala";
+      return;
+    } catch (error) {
+      speechRecognition = null;
+      speechActive = false;
+      $("runStatus").textContent = "Ditado ao vivo indisponível; iniciando modo local";
+    }
+  }
+  try {
+    microphoneStream = await navigator.mediaDevices.getUserMedia({
+      audio: { ...(selectedMicId === "default" ? {} : { deviceId: { exact: selectedMicId } }), echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    audioContext = new AudioContext();
+    audioChunks = [];
+    audioSource = audioContext.createMediaStreamSource(microphoneStream);
+    audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    audioProcessor.onaudioprocess = (event) => audioChunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    audioSource.connect(audioProcessor);
+    const silentOutput = audioContext.createGain();
+    silentOutput.gain.value = 0;
+    audioProcessor.connect(silentOutput);
+    silentOutput.connect(audioContext.destination);
+    $("dictate").classList.add("recording");
+    $("runStatus").textContent = "Gravando localmente... transcri\u00e7\u00e3o ao parar";
+  } catch (error) {
+    message("system", "N\u00e3o foi poss\u00edvel abrir o microfone: " + error.message);
+  }
+}
+
+async function stopLegacyRecording() {
+  if (speechRecognition) {
+    if (!speechStopPromise) {
+      speechStopPromise = new Promise(resolve => { speechStopResolve = resolve; });
+      speechRecognition.stop();
+    }
+    await Promise.race([speechStopPromise, new Promise(resolve => setTimeout(resolve, 2000))]);
+    return;
+  }
+  if (!$("dictate").classList.contains("recording") || !audioContext) return;
+  $("dictate").classList.remove("recording");
+  const sampleRate = audioContext.sampleRate;
+  audioProcessor.disconnect();
+  audioSource.disconnect();
+  microphoneStream.getTracks().forEach(track => track.stop());
+  await audioContext.close();
+  microphoneStream = null;
+  audioContext = null;
+  $("runStatus").textContent = "Transcrevendo localmente...";
+  try {
+    const audio = pcmBase64(resampleAudio(audioChunks, sampleRate));
+    const result = await request("/api/transcribe", {
+      method: "POST",
+      body: JSON.stringify({ audio }),
+    });
+    if (result.text) $("prompt").value = [$("prompt").value.trim(), result.text].filter(Boolean).join(" ");
+    $("runStatus").textContent = "Transcri\u00e7\u00e3o conclu\u00edda";
+  } catch (error) {
+    $("runStatus").textContent = "Falha na transcri\u00e7\u00e3o";
+    message("system", "N\u00e3o foi poss\u00edvel transcrever o \u00e1udio: " + error.message);
+  } finally { audioChunks = []; }
+}
+
+let sttSocket = null;
+let sttWarmSocket = null;
+let sttWarmReady = false;
+let sttWarmPromise = null;
+function prewarmStt() {
+  if (sttActive || sttSocket) return Promise.resolve(null);
+  if (sttWarmSocket && (sttWarmSocket.readyState === WebSocket.OPEN || sttWarmSocket.readyState === WebSocket.CONNECTING)) return sttWarmPromise || Promise.resolve(sttWarmSocket);
+  const ws = new WebSocket("ws://" + location.host + "/api/stt-stream");
+  sttWarmSocket = ws; sttWarmReady = false;
+  sttWarmPromise = new Promise((resolve) => {
+    const finish = (value) => resolve(value);
+    ws.onmessage = ({ data }) => {
+      let event; try { event = JSON.parse(data); } catch { return; }
+      if (event.type === "ready") { sttWarmReady = true; finish(ws); }
+      if (event.type === "error") { sttWarmReady = false; finish(null); ws.close(); }
+    };
+    ws.onerror = () => finish(null);
+    ws.onclose = () => { if (sttWarmSocket === ws) { sttWarmSocket = null; sttWarmReady = false; sttWarmPromise = null; } };
+  });
+  return sttWarmPromise;
+}
+function takeWarmSttSocket() {
+  const ws = sttWarmSocket && (sttWarmSocket.readyState === WebSocket.OPEN || sttWarmSocket.readyState === WebSocket.CONNECTING)
+    ? sttWarmSocket : new WebSocket("ws://" + location.host + "/api/stt-stream");
+  sttWarmSocket = null; sttWarmReady = false; sttWarmPromise = null;
+  return ws;
+}
+let sttReady = false;
+let sttBuffered = [];
+let sttBufferedBytes = 0;
+let sttFinishingBeforeReady = false;
+let sttActive = false;
+let sttBase = "";
+let sttPartial = "";
+let sttDone = null;
+let sttResolve = null;
+let voiceStartedAt = 0;
+let voiceAnimation = null;
+let voiceLevel = 0;
+let voiceHistory = Array(58).fill(0);
+let voiceBarsReady = false;
+let voiceDiscard = false;
+function initVoiceBars() {
+  if (voiceBarsReady) return;
+  const container = $("voiceWave");
+  if (!container) return;
+  const bars = document.createDocumentFragment();
+  for (let i = 0; i < voiceHistory.length; i++) {
+    const bar = document.createElement("span");
+    bar.className = "voiceBar";
+    bars.append(bar);
+  }
+  container.append(bars);
+  voiceBarsReady = true;
+}
+function renderVoiceWave() {
+  if (!$("liveVoiceBar") || $("liveVoiceBar").hidden) return;
+  voiceHistory.push(voiceLevel);
+  voiceHistory.shift();
+  voiceLevel *= 0.76;
+  const bars = $("voiceWave").children;
+  for (let i = 0; i < bars.length; i++) {
+    bars[i].style.height = (3 + Math.min(1, voiceHistory[i] * 8) * 23) + "px";
+  }
+  const sec = Math.max(0, Math.floor((Date.now() - voiceStartedAt) / 1000));
+  $("voiceTimer").textContent = String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
+}
+function beginVoiceVisual() {
+  initVoiceBars();
+  voiceStartedAt = Date.now();
+  voiceHistory.fill(0);
+  voiceLevel = 0;
+  $("liveVoiceBar").hidden = false;
+  if (voiceAnimation) clearInterval(voiceAnimation);
+  voiceAnimation = setInterval(renderVoiceWave, 80);
+}
+function endVoiceVisual() {
+  if (voiceAnimation) clearInterval(voiceAnimation);
+  voiceAnimation = null;
+  $("liveVoiceBar").hidden = true;
+}
+function analyzeVoiceLevel(samples) {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 8) sum += samples[i] * samples[i];
+  const rms = Math.sqrt(sum / Math.ceil(samples.length / 8));
+  voiceLevel = Math.max(voiceLevel * 0.65, Math.min(1, rms * 8));
+}
+$("voiceFinish").onclick = () => stopRecording();
+$("voiceCancel").onclick = async () => {
+  voiceDiscard = true;
+  await stopRecording();
+  $("prompt").value = sttBase;
+  $("runStatus").textContent = "Ditado descartado";
+  endVoiceVisual();
+};
+
+
+async function releaseStreamingMic() {
+  if (audioProcessor) { audioProcessor.disconnect(); audioProcessor = null; }
+  if (audioSource) { audioSource.disconnect(); audioSource = null; }
+  if (microphoneStream) {
+    microphoneStream.getTracks().forEach((track) => track.stop());
+    microphoneStream = null;
+  }
+  if (audioContext) { await audioContext.close().catch(() => {}); audioContext = null; }
+}
+function commitStreamingText(text) {
+  sttPartial = text || "";
+  $("prompt").value = [sttBase, sttPartial].filter(Boolean).join(" ").trim();
+}
+function resolveStreamingStop() {
+  if (sttResolve) sttResolve();
+  sttResolve = null;
+  sttDone = null;
+}
+async function startRecording() {
+  if (sttActive || $("dictate").classList.contains("recording")) return;
+  sttActive = true;
+  sttBase = $("prompt").value.trim();
+  sttPartial = "";
+  voiceDiscard = false;
+  sttReady = false; sttBuffered = []; sttBufferedBytes = 0; sttFinishingBeforeReady = false;
+  const url = "ws://" + location.host + "/api/stt-stream";
+  $("runStatus").textContent = "Carregando reconhecimento local...";
+  beginVoiceVisual();
+  try {
+    const ws = takeWarmSttSocket();
+    sttSocket = ws;
+    ws.onmessage = async ({ data }) => {
+      let event;
+      try { event = JSON.parse(data); } catch { return; }
+      if (event.type === "error") {
+        const error = String(event.error || "Falha no reconhecimento");
+        $("runStatus").textContent = error;
+        await releaseStreamingMic();
+        endVoiceVisual();
+        sttActive = false;
+        $("dictate").classList.remove("recording");
+        sttSocket = null;
+        ws.close();
+        resolveStreamingStop();
+        if (!sttPartial) await startLegacyRecording();
+        return;
+      }
+      if (event.type === "partial") {
+        if (!voiceDiscard) commitStreamingText(event.text);
+        $("runStatus").textContent = "Transcrevendo ao vivo...";
+        return;
+      }
+      if (event.type === "final") {
+        if (!voiceDiscard) commitStreamingText(event.text);
+        endVoiceVisual();
+        $("runStatus").textContent = "Transcri\u00e7\u00e3o conclu\u00edda";
+        sttSocket = null;
+        sttActive = false;
+        $("dictate").classList.remove("recording");
+        ws.close();
+        resolveStreamingStop();
+        setTimeout(() => prewarmStt().catch(() => {}), 250);
+        return;
+      }
+      if (event.type !== "ready") return;
+      sttReady = true;
+      for (const chunk of sttBuffered) if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+      sttBuffered = []; sttBufferedBytes = 0;
+      if (sttFinishingBeforeReady && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "finish" }));
+  $("runStatus").textContent = "Transcrevendo desde o in\u00edcio...";
+    };
+    try {
+      await resolveMic();
+        microphoneStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(selectedMicId === "default" ? {} : { deviceId: { exact: selectedMicId } }),
+            echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+          },
+        });
+
+        audioContext = new AudioContext();
+        audioSource = audioContext.createMediaStreamSource(microphoneStream);
+        audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        audioProcessor.onaudioprocess = (e) => {
+          if (ws.readyState !== WebSocket.OPEN || !sttActive) return;
+          const samples = e.inputBuffer.getChannelData(0);
+          analyzeVoiceLevel(samples);
+          const resampled = resampleAudio([new Float32Array(samples)], audioContext.sampleRate);
+          const raw = new ArrayBuffer(resampled.length * 2);
+          const pcm = new DataView(raw);
+          for (let i = 0; i < resampled.length; i++) {
+            const sample = Math.max(-1, Math.min(1, resampled[i]));
+            pcm.setInt16(i * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+          }
+          if (sttReady && ws.readyState === WebSocket.OPEN) {
+  if (ws.bufferedAmount < 160000) ws.send(raw);
+} else if (sttBufferedBytes + raw.byteLength <= 192000) {
+  sttBuffered.push(raw); sttBufferedBytes += raw.byteLength;
+}
+        };
+        audioSource.connect(audioProcessor);
+        const silent = audioContext.createGain();
+        silent.gain.value = 0;
+        audioProcessor.connect(silent);
+        silent.connect(audioContext.destination);
+        $("dictate").classList.add("recording");
+  $("runStatus").textContent = "Ouvindo desde agora... preparando transcri\u00e7\u00e3o";
+
+    } catch (error) {
+      sttActive = false;
+      $("runStatus").textContent = "Microfone indisponível: " + error.message;
+      ws.close();
+      await releaseStreamingMic();
+      endVoiceVisual();
+      resolveStreamingStop();
+    }
+  ws.onerror = () => { $("runStatus").textContent = "Falha na conex\u00e3o local de voz"; };
+    ws.onclose = async () => {
+      if (!sttActive) return;
+      sttActive = false;
+      $("dictate").classList.remove("recording");
+      await releaseStreamingMic();
+      endVoiceVisual();
+      sttSocket = null;
+      resolveStreamingStop();
+      setTimeout(() => prewarmStt().catch(() => {}), 250);
+    };
+  } catch (error) {
+    sttActive = false;
+    await startLegacyRecording();
+  }
+}
+async function stopRecording() {
+  if (sttSocket) {
+    const ws = sttSocket;
+    if (!sttDone) sttDone = new Promise((resolve) => { sttResolve = resolve; });
+    sttActive = false;
+    $("dictate").classList.remove("recording");
+    await releaseStreamingMic();
+    endVoiceVisual();
+    if (ws.readyState === WebSocket.OPEN) {
+      if (sttReady) ws.send(JSON.stringify({ type: "finish" }));
+      else sttFinishingBeforeReady = true;
+  $("runStatus").textContent = "Finalizando transcri\u00e7\u00e3o...";
+    } else {
+      ws.close();
+      resolveStreamingStop();
+    }
+    await Promise.race([sttDone, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    sttSocket = null;
+    return;
+  }
+  endVoiceVisual();
+  await stopLegacyRecording();
+}
+
+stopDictationForSend = stopRecording;
+$("dictate").onclick = () => {
+  if ($("dictate").classList.contains("recording")) stopRecording();
+  else startRecording();
+};
 $("prompt").onkeydown = (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+  if (e.key === "ArrowUp" && !e.shiftKey && !e.ctrlKey && !e.metaKey && ($("prompt").selectionStart === 0 || !$("prompt").value)) {
+    if (promptHistoryIndex === -1) promptDraft = $("prompt").value;
+    if (sentPrompts.length) {
+      promptHistoryIndex = Math.min(promptHistoryIndex + 1, sentPrompts.length - 1);
+      $("prompt").value = sentPrompts[promptHistoryIndex];
+      e.preventDefault();
+    }
+    return;
+  }
+  if (e.key === "ArrowDown" && promptHistoryIndex >= 0) {
+    promptHistoryIndex -= 1;
+    $("prompt").value = promptHistoryIndex < 0 ? promptDraft : sentPrompts[promptHistoryIndex];
+    e.preventDefault();
+    return;
+  }
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     send();
   }
@@ -568,4 +1445,18 @@ document.querySelectorAll("[data-prompt]").forEach(
       $("prompt").focus();
     }),
 );
-refresh().catch((e) => message("system", e.message));
+const pcHealthTimer = setInterval(() => refreshPcControllerHealth().catch(() => {}), 2000);
+refresh()
+  .then(async () => {
+    const requested = new URLSearchParams(location.search).get("session");
+    const latest = [...state.sessions].sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0];
+    const selected = requested && state.sessions.some(session => session.id === requested)
+      ? requested
+      : latest?.id;
+    if (selected) await loadSession(selected);
+  })
+  .catch((e) => message("system", e.message));
+
+
+
+setTimeout(() => prewarmStt().catch(() => {}), 600);

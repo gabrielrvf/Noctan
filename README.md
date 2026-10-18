@@ -18,7 +18,7 @@
 
 O **Noctan** é um cliente desktop independente para trabalhar com o Claude através da **API da Anthropic**. Ele reúne conversas, acesso autorizado a arquivos do computador, workspaces, `CLAUDE.md`, MCPs, plugins e arquivos de memória em uma interface própria.
 
-Não é um produto oficial da Anthropic. Usa créditos da **API**, separados dos limites de assinatura do claude.ai. Cada chamada à API pode ter cobrança por uso.
+Não é um produto oficial da Anthropic. O Noctan foi criado para aproveitar os créditos mensais de API incluídos nos planos elegíveis do Claude: atualmente, **Max 5x inclui US$ 100 por ciclo e Max 20x inclui US$ 200 por ciclo**, depois que o usuário vincula sua organização do Claude Console. Pro e Free não recebem esse benefício. Também é possível usar créditos de API comprados separadamente. Valores e elegibilidade podem mudar; confira sempre a documentação oficial da Anthropic.
 
 ## Recursos
 
@@ -31,10 +31,12 @@ Não é um produto oficial da Anthropic. Usa créditos da **API**, separados dos
 - Consulta a Vault, diretórios adicionais e instruções autorizadas.
 - Indicador de consumo local estimado em dólares, **sem limite de turnos ou orçamento por tarefa imposto pelo Noctan**. O provedor ainda pode aplicar limites próprios.
 - API Key protegida por criptografia associada ao usuário do Windows; nunca é enviada ao repositório ou ao Vault.
+- Gerenciador visual do **PC Controller / OpenAI Secure MCP Tunnel**, sem deixar uma janela do PowerShell aberta.
+- Inicialização automática do PC Controller quando uma Runtime API Key já estiver configurada.
 
 ## Começar no Windows
 
-Requisitos: Windows, Node.js 20 ou superior e uma API Key válida da Anthropic.
+Requisitos para o chat: Windows, Node.js 20 ou superior, uma API Key válida da Anthropic e saldo disponível na organização do Claude Console. Para receber o benefício mensal, vincule uma organização elegível ao Claude Max ou Team em **Claude → Configurações → Cobrança → Créditos de API**.
 
 ```powershell
 npm install
@@ -60,6 +62,17 @@ O comando `npm run dist:win` constrói o instalador **somente quando você decid
 O Noctan usa um serviço HTTP restrito a `127.0.0.1`. No Windows, preferências, sessões e anexos são armazenados na pasta de dados do aplicativo, dentro de `%APPDATA%\Noctan\data`.
 
 A API Key é persistida em arquivo criptografado com proteção do usuário Windows. Não cole chaves no Git, em arquivos `README.md`, no Vault ou em conversas compartilhadas.
+
+## PC Controller sem PowerShell
+
+O botão **PC Controller** no topo inicia, desconecta e mostra o estado do Secure MCP Tunnel. Na primeira configuração, informe:
+
+1. A pasta local do projeto `mcp-chatgpt`, contendo `tunnel-client.exe`.
+2. A **Runtime API Key da OpenAI Platform** usada pelo Secure Tunnel.
+
+Essa Runtime Key autentica o transporte do túnel; ela não é uma chave de inferência do GPT e não transforma o Noctan em um cliente independente do ChatGPT. Depois de salva, fica protegida pela conta do Windows e o túnel inicia automaticamente com o Noctan, sem exibir os logs técnicos do PowerShell.
+
+Quem não possui Claude Max ainda pode usar o Noctan como painel visual do PC Controller, desde que tenha acesso compatível a apps/conectores e Secure MCP Tunnel no ChatGPT. Sem crédito da Anthropic, porém, o chat Claude dentro do Noctan não responde.
 
 O Noctan não acessa automaticamente sessões privadas do Chrome/claude.ai nem transfere a autenticação do Google para o WebView do Electron. O painel de créditos oficial pode exigir autenticação separada.
 

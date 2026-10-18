@@ -12,6 +12,19 @@ body {
   margin: 0;
   background: #111;
 }
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 32px;
+  background: #0b0b0b;
+  -webkit-app-region: drag;
+  z-index: 10000;
+}
+.layout {
+  margin-top: 32px;
+  height: calc(100vh - 32px);
+}
 button,
 input,
 textarea,
@@ -37,22 +50,46 @@ button:disabled {
   cursor: not-allowed;
 }
 .primary {
-  background: #d97757;
-  border-color: #d97757;
-  color: #fff;
+  background: #d6a93b;
+  border-color: #d6a93b;
+  color: #17130a;
   font-weight: 650;
 }
 .primary:hover {
-  background: #c96849;
+  background: #e4bc55;
 }
 .ghost {
   background: transparent;
 }
 .layout {
   display: flex;
-  height: 100dvh;
+  height: calc(100dvh - 32px);
   min-height: 560px;
 }
+.headerRight #pcControllerBtn.connected {
+  color: #7fd3a3;
+  border-color: #315a43;
+}
+.pcControllerButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pcControllerButton i {
+  display: block;
+  flex: 0 0 5px;
+  width: 5px;
+  min-width: 5px;
+  max-width: 5px;
+  height: 5px;
+  padding: 0;
+  border-radius: 999px;
+  background: #696969;
+  box-shadow: none;
+}
+.pcControllerButton i.connecting { background: #d6a93b; }
+.pcControllerButton i.connected { background: #4ec985; }
+.pcControllerButton i.error { background: #d65f52; }
 .sidebar {
   width: 280px;
   background: #0d0d0d;
@@ -81,8 +118,19 @@ button:disabled {
 }
 .logo,
 .biglogo {
-  color: #d97757;
+  color: #d6a93b;
   font-size: 25px;
+}
+.logo img,
+.biglogo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.logo {
+  width: 28px;
+  height: 28px;
 }
 .search {
   width: 100%;
@@ -154,6 +202,31 @@ select:focus {
   border-top: 1px solid #272727;
   padding: 12px 5px 2px;
 }
+.sidebarCredits {
+  grid-column: 1/-1;
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  width: 100%;
+  padding: 10px 9px;
+  border: 0;
+  border-radius: 9px;
+  color: #ddd;
+  text-align: left;
+  background: transparent;
+}
+.sidebarCredits:hover {
+  background: #252525;
+}
+.sidebarCredits strong {
+  color: #aaa;
+  font-size: 11px;
+  font-weight: 500;
+}
+.creditsIcon {
+  color: #d6a93b;
+  font-size: 17px;
+}
 .profileDot {
   width: 28px;
   height: 28px;
@@ -192,6 +265,41 @@ header {
   justify-content: space-between;
   padding: 12px 22px;
   gap: 10px;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.titleRow h1 {
+  margin: 0;
+}
+.providerSwitch {
+  display: flex;
+  padding: 2px;
+  border: 1px solid #343434;
+  border-radius: 9px;
+  background: #1d1d1d;
+}
+.providerSwitch button {
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: #888;
+  background: transparent;
+  font-size: 10px;
+}
+.providerSwitch button.selected {
+  color: #17130a;
+  background: #d6a93b;
+}
+.newWindowButton {
+  padding: 4px 8px;
+  border: 0;
+  color: #999;
+  background: transparent;
+  font-size: 10px;
 }
 h1 {
   font-size: 14px;
@@ -236,7 +344,9 @@ h1 {
   max-width: 570px;
 }
 .biglogo {
-  font-size: 54px;
+  width: 72px;
+  height: 72px;
+  margin-inline: auto;
 }
 .suggestions {
   display: flex;
@@ -318,7 +428,7 @@ h1 {
   font-size: 11px;
   color: #aaa;
   background: #191919;
-  border-left: 2px solid #d97757;
+  border-left: 2px solid #d6a93b;
   padding: 8px 12px;
   border-radius: 4px;
   overflow-wrap: anywhere;
@@ -328,6 +438,39 @@ h1 {
   margin: 0 auto;
   padding: 12px 0 18px;
   background: transparent;
+}
+.composer.dragging {
+  outline: 2px dashed #d6a93b;
+  outline-offset: 6px;
+  border-radius: 14px;
+}
+.attachmentTray {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 9px;
+  overflow-x: auto;
+}
+.attachmentCard {
+  position: relative;
+  flex: 0 0 auto;
+}
+.attachmentCard img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid #444;
+  border-radius: 9px;
+}
+.attachmentCard button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border-radius: 50%;
+  background: #303030;
+  color: #fff;
 }
 .composer textarea {
   width: 100%;
@@ -339,6 +482,107 @@ h1 {
   color: #eee;
   padding: 14px;
   outline: none;
+}
+.composerTools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.iconButton {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 17px;
+}
+.iconButton.recording {
+  color: #111;
+  background: #d6a93b;
+  box-shadow: 0 0 0 4px #d6a93b33;
+}
+.micControl {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid #3a3a3a;
+  border-radius: 15px;
+  background: #202020;
+}
+.micControl .iconButton {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 15px 0 0 15px;
+  background: transparent;
+}
+.micControl .iconButton.recording {
+  color: #111;
+  background: #d6a93b;
+  box-shadow: none;
+}
+.micButton svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+.micArrow {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 28px;
+  padding: 0 4px 2px 2px;
+  border: 0;
+  border-left: 1px solid #393939;
+  border-radius: 0 15px 15px 0;
+  color: #aaa;
+  background: transparent;
+}
+.micPopover {
+  left: 0;
+  bottom: 37px;
+  width: 340px;
+  max-height: 330px;
+  overflow: auto;
+}
+#micDevices {
+  display: grid;
+  gap: 2px;
+  margin-top: 7px;
+}
+.micChoice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  text-align: left;
+  background: transparent;
+}
+.micChoice:hover {
+  background: #303030;
+}
+.micChoice.selected::after {
+  content: "✓";
+  color: #d6a93b;
+}
+.micHint {
+  padding: 8px;
+  color: #888;
+}
+.recordToggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 7px;
+  padding: 9px;
+  border-top: 1px solid #3a3a3a;
 }
 .composeFoot {
   display: flex;
@@ -374,6 +618,34 @@ h1 {
 }
 .pending button {
   margin-right: 8px;
+}
+.officialCreditsButton {
+  width: 100%;
+  margin-top: 10px;
+  color: #17130a;
+  background: #d6a93b;
+}
+.officialCreditsModal {
+  width: min(1120px, calc(100vw - 40px));
+  height: min(760px, calc(100vh - 40px));
+  max-width: none;
+  overflow: hidden;
+}
+.officialCreditsModal .modalHead {
+  flex: 0 0 auto;
+}
+.officialCreditsModal .modalHead .hint {
+  margin: 3px 0 0;
+}
+#officialCreditsView {
+  display: flex;
+  width: 100%;
+  height: calc(100% - 62px);
+  margin-top: 10px;
+  border: 1px solid #333;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #111;
 }
 .overlay {
   position: fixed;
@@ -417,7 +689,7 @@ h1 {
 .eyebrow {
   font-size: 9px;
   letter-spacing: 1.7px;
-  color: #d97757;
+  color: #d6a93b;
   font-weight: 800;
 }
 .hint {
@@ -649,7 +921,7 @@ h1 {
   background: #272727;
 }
 .effortChoices button.selected {
-  border-color: #d97757;
+  border-color: #d6a93b;
   color: #f0a184;
 }
 .fastRow,
@@ -716,3 +988,59 @@ h1 {
   margin-top: 10px;
   font-size: 13px;
 }
+
+/* Live dictation controls */
+.liveVoiceBar[hidden], .creditsBrowserFallback[hidden] { display:none!important }
+.liveVoiceBar { height:43px; display:flex; align-items:center; gap:11px; padding:5px 9px;
+  background:#242424; border:1px solid #454545; border-radius:24px; margin:2px 0 9px; }
+.voiceWave { flex:1; min-width:0; height:28px; display:flex; align-items:center; justify-content:center; gap:3px; overflow:hidden }
+.voiceBar { width:3px; height:7px; min-height:3px; flex:0 0 3px; background:#bca0e7; border-radius:4px;
+  transition:height 85ms ease-out; }
+.voiceCancel,.voiceFinish { border:0; border-radius:50%; height:30px; width:30px; flex-shrink:0; font-size:20px; cursor:pointer; }
+.voiceCancel {background:#373737;color:#eee}.voiceFinish {background:#e0c3ff;color:#21132e;font-size:12px}
+.voiceTimer { font-size:12px; color:#bbb; font-variant-numeric:tabular-nums }
+.creditsActions {display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-top:10px}
+.creditsActions button {padding:8px 12px; border-radius:8px; cursor:pointer}
+.creditsActions .hint {font-size:12px;opacity:.75}
+.creditsBrowserFallback {padding:22px;border:1px solid #444;border-radius:10px;line-height:1.6}
+.creditsBrowserFallback a {display:block;margin-top:10px}
+#officialCreditsView {height:calc(100% - 110px)}
+
+.voiceCancel,.voiceFinish{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif}
+.voiceCancel svg,.voiceFinish svg{height:17px;width:17px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.voiceFinish svg{fill:currentColor;stroke:none}
+.voiceFinish{background:#e0c3ff;color:#22152d;min-width:32px;min-height:32px}
+
+.messageText { white-space: pre-wrap; overflow-wrap: break-word; }
+.messageAttachments { font-size: 11px; opacity: 0.8; margin-top: 6px; white-space: nowrap; }
+
+.agentProgress { align-self:flex-start; width:min(680px,92%); border:1px solid #36313f; background:#211e26;
+  color:#dac5f4; border-radius:12px; padding:10px 14px; font-size:12px; }
+.agentProgress summary { cursor:pointer; list-style:disclosure-closed; font-weight:600; padding:3px 0; }
+.agentProgress[open] summary { list-style:disclosure-open; }
+.agentProgressLog { margin-top:10px; max-height:300px; overflow-y:auto; color:#b7b2bd; font-size:11px; line-height:1.7;
+  border-top:1px solid #444; padding-top:7px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.agentProgress.finished { background:#1a1a1e; color:#b8b4bf; }
+
+.promptShell{position:relative;width:100%}
+.promptShell textarea{padding:15px 60px 15px 15px;min-height:80px;max-height:220px}
+.sendInside{position:absolute;right:11px;bottom:11px;width:38px;height:38px;display:grid;place-items:center;padding:0;border-radius:12px;border:0;background:#d6a93b;color:#17120b;font-size:23px}
+.sendInside:disabled{opacity:.45;cursor:not-allowed}
+.footerActions #usageDot{width:21px;height:21px}
+
+.agentProgress summary{display:flex;align-items:center;gap:10px;cursor:pointer}
+.agentSpinner{width:23px;height:23px;object-fit:contain;flex-shrink:0;animation:agentSpin 2.8s linear infinite}
+@keyframes agentSpin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.agentSpinner{animation:none}}
+
+.sendInside svg{height:21px;width:21px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+
+.sessionRow{display:flex;align-items:center;gap:4px;width:100%}
+.sessionRow .session{flex:1;min-width:0}
+.sessionRow.active .session{background:var(--surface-3,#242424)}
+.sessionDelete{flex:0 0 28px;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:#8e8e93;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center}
+.sessionDelete:hover{background:#352326;color:#ff6b72}
+
+.message.user{position:relative;padding-right:42px}
+.messageEdit{position:absolute;right:8px;top:8px;width:26px;height:26px;padding:0;border:0;border-radius:7px;display:flex;align-items:center;justify-content:center;background:transparent;color:#9a9a9f;cursor:pointer;font-size:15px;line-height:1}
+.messageEdit:hover{background:#3a3a3a;color:#fff}

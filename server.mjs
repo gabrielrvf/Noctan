@@ -4,28 +4,47 @@ import { existsSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
 import { homedir, platform } from "node:os";
 import { randomUUID } from "node:crypto";
+import { saveApiKey, loadApiKey, removeApiKey } from "./secure-key.mjs";
+import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelStatusLive } from "./tunnel-manager.mjs";
+import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
 import { fileURLToPath } from "node:url";
 const BASE = dirname(fileURLToPath(import.meta.url));
-const DATA = process.env.CLAUDE_X_DATA_DIR
-  ? resolve(process.env.CLAUDE_X_DATA_DIR)
-  : join(BASE, "data");
+function resolveClaudeCodeExecutable() {
+  const candidates = [
+    process.resourcesPath ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@anthropic-ai", "claude-agent-sdk-win32-x64", "claude.exe") : "",
+    join(BASE, "node_modules", "@anthropic-ai", "claude-agent-sdk-win32-x64", "claude.exe"),
+  ].filter(Boolean);
+  return candidates.find(existsSync) || undefined;
+}
+const DATA_DIR = process.env.NOCTAN_DATA_DIR || process.env.CLAUDE_X_DATA_DIR;
+const DATA = DATA_DIR ? resolve(DATA_DIR) : (process.platform === "win32" && process.env.APPDATA ? join(process.env.APPDATA, "Noctan", "data") : join(homedir(), ".noctan", "data"));
 const CONFIG = join(DATA, "config.json");
 const SESSIONS = join(DATA, "sessions.json");
+const ATTACHMENTS = join(DATA, "attachments");
+const SECRET_FILE = join(DATA, "anthropic-key.dpapi");
+const OPENAI_SECRET_FILE = join(DATA, "openai-key.dpapi");
+const TUNNEL_SECRET_FILE = join(DATA, "tunnel-runtime-key.dpapi");
 const HOST = "127.0.0.1",
   PORT = Number(process.env.PORT || 4177);
 const defaults = {
+  provider: "anthropic",
   workspace: "",
   vault: "",
   model: "sonnet",
+  anthropicModel: "sonnet",
+  openaiModel: "gpt-5.4",
   effort: "medium",
-  maxTurns: 15,
-  maxBudgetUsd: 1,
   settingSources: ["user", "project", "local"],
   pluginPaths: [],
   mcpConfigPaths: [],
   additionalDirectories: [],
   systemInstructions: "",
   safeMode: true,
+  microphoneId: "default",
+  microphoneLabel: "",
+  pcControllerPath: defaultControllerPath(),
+  tunnelProfile: "mcp-chatgpt-full-pc-dev",
+  autoStartTunnel: true,
 };
 let config = { ...defaults },
   sessions = {},
@@ -46,17 +65,136 @@ async function loadJson(path, fallback) {
     return fallback;
   }
 }
-async function saveJson(path, obj) {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = path + ".tmp";
-  await writeFile(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
-  await import("node:fs/promises").then((fs) => fs.rename(tmp, path));
+function mergeSessions(stored, incoming) {
+  const merged = {...stored};
+  for (const [id, current] of Object.entries(incoming || {})) {
+    const previous = merged[id];
+    if (!previous) { merged[id] = current; continue; }
+    const found = new Map();
+    for (const msg of [...(previous.messages || []), ...(current.messages || [])]) {
+      const key = JSON.stringify([msg.role, msg.text, msg.at, msg.costUsd]);
+      found.set(key,msg);
+    }
+    const messages = [...found.values()].sort((a,b) => String(a.at || "").localeCompare(String(b.at || "")));
+    const mostRecent = String(current.updatedAt || "") >= String(previous.updatedAt || "") ? current : previous;
+    merged[id] = {...previous,...current,...mostRecent,messages};
+  }
+  return merged;
+}
+async function saveJson(path,obj) {
+  await mkdir(dirname(path), {recursive:true});
+  if (path !== SESSIONS) {
+    const tmp=path+".tmp-"+randomUUID();
+    await writeFile(tmp, JSON.stringify(obj,null,2), {mode:0o600});
+    await import("node:fs/promises").then(fs=>fs.rename(tmp,path));
+    return;
+  }
+  const lock=SESSIONS+".lock";
+  let taken=false;
+  for(let i=0;i<150;i++){
+    try {await mkdir(lock);taken=true;break;}
+    catch(e){ if(e.code!=="EEXIST")throw e;
+      if(i===149)throw Error("Conversas ocupadas: tente novamente.");
+      await new Promise(done=>setTimeout(done,50));
+    }
+  }
+  try {
+    const onDisk=await loadJson(SESSIONS,{});
+    const merged=mergeSessions(onDisk,obj);
+    const tmp=SESSIONS+".tmp-"+randomUUID();
+    await writeFile(tmp,JSON.stringify(merged,null,2),{mode:0o600});
+    await import("node:fs/promises").then(fs=>fs.rename(tmp,SESSIONS));
+    sessions=merged;
+  } finally {
+    if(taken)await import("node:fs/promises").then(fs=>fs.rm(lock,{recursive:true,force:true}));
+  }
+}
+
+async function deleteSessionById(id) {
+  if (!id || active.has(id)) throw Error("Não é possível apagar uma conversa em execução.");
+  await mkdir(dirname(SESSIONS), { recursive: true });
+  const lock = SESSIONS + ".lock";
+  let taken = false;
+  for (let i = 0; i < 150; i++) {
+    try { await mkdir(lock); taken = true; break; }
+    catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      if (i === 149) throw Error("Conversas ocupadas: tente novamente.");
+      await new Promise(done => setTimeout(done, 50));
+    }
+  }
+  try {
+    const onDisk = await loadJson(SESSIONS, {});
+    if (!onDisk[id] && !sessions[id]) return false;
+    delete onDisk[id];
+    delete sessions[id];
+    const tmp = SESSIONS + ".tmp-" + randomUUID();
+    await writeFile(tmp, JSON.stringify(onDisk, null, 2), { mode: 0o600 });
+    await import("node:fs/promises").then(fs => fs.rename(tmp, SESSIONS));
+    sessions = onDisk;
+    return true;
+  } finally {
+    if (taken) await import("node:fs/promises").then(fs => fs.rm(lock, { recursive: true, force: true }));
+  }
+}
+async function appendSessionNotice(id, text, meta = {}) {
+  sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+  const session = sessions[id];
+  if (!session) throw Error("Conversa não encontrada");
+  const item = { role: "system", text: String(text || "").trim().slice(0, 2000), kind: String(meta.kind || "notice").slice(0, 40), model: meta.model ? String(meta.model).slice(0, 120) : undefined, at: new Date().toISOString() };
+  if (!item.text) throw Error("Aviso vazio");
+  session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
+  await saveJson(SESSIONS, sessions);
+  const running = active.get(id);
+  if (running && running.res) send(running.res, "notice", { text: item.text, kind: item.kind, model: item.model || null });
+  return item;
+}
+
+async function editSessionUserMessage(id, index, text) {
+  if (active.has(id)) throw Error("Pare a execução antes de editar uma mensagem.");
+  sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+  const session = sessions[id];
+  if (!session) throw Error("Conversa não encontrada");
+  const target = session.messages && session.messages[index];
+  if (!target || target.role !== "user") throw Error("Mensagem de usuário não encontrada");
+  const nextText = String(text || "").trim();
+  if (!nextText || nextText.length > 40000) throw Error("Mensagem vazia ou muito longa.");
+  target.text = nextText; target.editedAt = new Date().toISOString();
+  session.messages = session.messages.slice(0, index + 1);
+  delete session.claudeSessionId; delete session.openaiResponseId;
+  session.updatedAt = target.editedAt; sessions[id] = session;
+  await saveJson(SESSIONS, sessions);
+  return { session, index };
+}
+
+async function pushLiveFollowUp(body) {
+  const id = String(body.sessionId || "");
+  const running = active.get(id);
+  if (!running) throw Error("Não há execução ativa nesta conversa.");
+  if (running.provider !== "anthropic") throw Error("Follow-up ao vivo está disponível para o Claude.");
+  const text = String(body.prompt || "").trim();
+  if (!text || text.length > 40000) throw Error("Mensagem vazia ou muito longa.");
+  sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+  const session = sessions[id];
+  if (!session) throw Error("Conversa não encontrada");
+  const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
+  session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
+  await saveJson(SESSIONS, sessions);
+  const sdkMessage = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, priority: "next" };
+  if (running.query) {
+    async function* one() { yield sdkMessage; }
+    await running.query.streamInput(one());
+  } else {
+    running.pendingInputs = running.pendingInputs || []; running.pendingInputs.push(sdkMessage);
+  }
+  if (running.res) send(running.res, "notice", { text: "Nova mensagem recebida durante a execução.", kind: "follow-up" });
+  return item;
 }
 const readBody = async (req) => {
   let s = "";
   for await (const c of req) {
     s += c;
-    if (s.length > 300000) throw Error("Requisição muito grande");
+    if (s.length > 20_000_000) throw Error("RequisiÃ§Ã£o muito grande");
   }
   return JSON.parse(s || "{}");
 };
@@ -68,23 +206,27 @@ function cleanConfig(input) {
   for (const k of Object.keys(defaults)) {
     if (k in input) next[k] = input[k];
   }
-  for (const k of ["workspace", "vault"]) next[k] = localPath(next[k]);
+  for (const k of ["workspace", "vault", "pcControllerPath"]) next[k] = localPath(next[k]);
   for (const k of ["pluginPaths", "mcpConfigPaths", "additionalDirectories"])
     next[k] = Array.isArray(next[k])
       ? next[k]
           .filter((x) => typeof x === "string" && x.trim())
           .map((x) => resolve(x))
       : [];
-  next.maxTurns = Math.max(1, Math.min(100, Number(next.maxTurns) || 15));
-  next.maxBudgetUsd = Math.max(
-    0.05,
-    Math.min(100, Number(next.maxBudgetUsd) || 1),
-  );
   next.safeMode = Boolean(next.safeMode);
+  next.autoStartTunnel = Boolean(next.autoStartTunnel);
+  next.tunnelProfile = String(next.tunnelProfile || defaults.tunnelProfile).replace(/[^A-Za-z0-9._-]/g, "").slice(0,120);
+  next.provider = ["anthropic", "openai"].includes(next.provider)
+    ? next.provider
+    : "anthropic";
+  next.microphoneId = String(next.microphoneId || "default").slice(0,512);
+  next.microphoneLabel = String(next.microphoneLabel || "").slice(0,512);
   next.settingSources = ["user", "project", "local"].filter((s) =>
     next.settingSources?.includes(s),
   );
   next.model = String(next.model || defaults.model).slice(0, 120);
+  next.anthropicModel = String(next.anthropicModel || "sonnet").slice(0, 120);
+  next.openaiModel = String(next.openaiModel || "gpt-5.4").slice(0, 120);
   next.effort = ["low", "medium", "high"].includes(next.effort)
     ? next.effort
     : defaults.effort;
@@ -110,7 +252,10 @@ function sessionView(s) {
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     messages: s.messages,
+    provider: s.provider || "anthropic",
     claudeSessionId: s.claudeSessionId || null,
+    openaiResponseId: s.openaiResponseId || null,
+    pendingPrompt: s.pendingPrompt || null,
   };
 }
 function send(res, type, data) {
@@ -120,32 +265,113 @@ function send(res, type, data) {
 function respondError(res, e) {
   json(res, 500, { error: String(e?.message || e) });
 }
+let transcriberPromise = null;
+async function getTranscriber() {
+  if (!transcriberPromise)
+    transcriberPromise = (async () => {
+      const transformers = await import("@huggingface/transformers");
+      transformers.env.cacheDir = join(DATA, "models");
+      await mkdir(transformers.env.cacheDir, { recursive: true });
+      return transformers.pipeline(
+        "automatic-speech-recognition",
+        "onnx-community/whisper-base",
+        { dtype: "q8" },
+      );
+    })();
+  return transcriberPromise.catch(error => { transcriberPromise = null; throw error; });
+}
+function decodePcm16(base64) {
+  const bytes = Buffer.from(base64, "base64");
+  if (bytes.length < 2 || bytes.length > 12_000_000)
+    throw Error("Ãudio vazio ou maior que o limite permitido.");
+  const samples = new Float32Array(Math.floor(bytes.length / 2));
+  for (let index = 0; index < samples.length; index += 1)
+    samples[index] = bytes.readInt16LE(index * 2) / 32768;
+  return samples;
+}
+async function transcribeAudio(req, res) {
+  const body = await readBody(req);
+  const audio = decodePcm16(String(body.audio || ""));
+  const transcriber = await getTranscriber();
+  const result = await transcriber(audio, {
+    language: "portuguese",
+    task: "transcribe",
+    chunk_length_s: 30,
+    stride_length_s: 5,
+  });
+  return json(res, 200, { text: String(result?.text || "").trim() });
+}
 async function runAgent(req, res) {
-  if (!process.env.ANTHROPIC_API_KEY)
+  const body = await readBody(req);
+  const provider = body.provider === "openai" ? "openai" : "anthropic";
+  const providerKey =
+    provider === "openai"
+      ? process.env.OPENAI_API_KEY
+      : process.env.ANTHROPIC_API_KEY;
+  if (!providerKey)
     return json(res, 409, {
-      error: "ANTHROPIC_API_KEY não configurada. Execute iniciar-windows.ps1.",
+      error: `Conecte a chave da ${provider === "openai" ? "OpenAI" : "Anthropic"} antes de enviar.`,
     });
   if (!config.workspace || !existsSync(config.workspace))
     return json(res, 409, {
-      error: "Configure um workspace existente em Configurações.",
+      error: "Configure um workspace existente em ConfiguraÃ§Ãµes.",
     });
-  const body = await readBody(req),
-    prompt = String(body.prompt || "").trim();
-  if (!prompt || prompt.length > 40000)
+  const originalPrompt = String(body.prompt || "").trim(),
+    attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
+  if ((!originalPrompt && !attachments.length) || originalPrompt.length > 40000)
     return json(res, 400, { error: "Mensagem vazia ou muito longa." });
+  const savedAttachments = [];
+  if (attachments.length) {
+    await mkdir(ATTACHMENTS, { recursive: true });
+    for (const item of attachments) {
+      const match = String(item?.dataUrl || "").match(
+        /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/,
+      );
+      if (!match) throw Error("Formato de imagem nÃ£o permitido.");
+      const bytes = Buffer.from(match[2], "base64");
+      if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
+      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
+      const path = join(ATTACHMENTS, `${randomUUID()}.${ext}`);
+      await writeFile(path, bytes, { mode: 0o600 });
+      savedAttachments.push(path);
+    }
+  }
+  const prompt = [
+    originalPrompt || "Analise as imagens anexadas.",
+    savedAttachments.length
+      ? `\nImagens anexadas pelo usuÃ¡rio (use a ferramenta Read para visualizÃ¡-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
+      : "",
+  ].join("");
+  sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
   const id =
     typeof body.sessionId === "string" && sessions[body.sessionId]
       ? body.sessionId
       : randomUUID();
   if (active.has(id))
-    return json(res, 409, { error: "Já existe execução nessa conversa." });
+    return json(res, 409, { error: "JÃ¡ existe execuÃ§Ã£o nessa conversa." });
+  const editReplayIndex = Number.isInteger(body.editReplayIndex) ? body.editReplayIndex : null;
   const s = sessions[id] || {
     id,
-    title: prompt.slice(0, 65),
+    title: (originalPrompt || "Imagem anexada").slice(0, 65),
     createdAt: new Date().toISOString(),
     messages: [],
+    provider,
   };
-  s.messages.push({ role: "user", text: prompt, at: new Date().toISOString() });
+  if ((s.provider || provider) !== provider && s.messages.length)
+    return json(res, 409, {
+      error: "Esta conversa pertence a outro provedor. Abra um novo chat para trocar.",
+    });
+  s.provider = provider;
+  delete s.pendingPrompt;
+  const replayingEdit = editReplayIndex !== null && s.messages?.[editReplayIndex]?.role === "user";
+  const historyForRebuild = !s.claudeSessionId ? (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])]) : [];
+  if (!replayingEdit) s.messages.push({
+    role: "user",
+    text: originalPrompt || "Imagem anexada",
+    attachments: savedAttachments.map((path) => basename(path)),
+    provider,
+    at: new Date().toISOString(),
+  });
   s.updatedAt = new Date().toISOString();
   sessions[id] = s;
   await saveJson(SESSIONS, sessions);
@@ -158,12 +384,76 @@ async function runAgent(req, res) {
   });
   send(res, "start", { sessionId: id });
   const ctrl = new AbortController();
-  active.set(id, { ctrl, res });
+  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider });
   let finalText = "",
-    spent = 0;
+    spent = 0,
+    assistantRecord = null;
+  const persistAssistant = async () => {
+    const text = finalText.trim();
+    if (!text) return;
+    if (!assistantRecord) {
+      assistantRecord = { role: "assistant", text, costUsd: spent, provider, at: new Date().toISOString() };
+      s.messages.push(assistantRecord);
+    } else {
+      assistantRecord.text = text;
+      assistantRecord.costUsd = spent;
+      assistantRecord.provider = provider;
+    }
+    s.updatedAt = new Date().toISOString();
+    sessions[id] = s;
+    await saveJson(SESSIONS, sessions);
+  };
   try {
+    if (provider === "openai") {
+      const { runOpenAI } = await import("./openai-provider.mjs");
+      const askApproval = async (toolName, input) => {
+        if (ctrl.signal.aborted) return false;
+        const aid = randomUUID();
+        send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
+        return await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            approvals.delete(aid);
+            resolve(false);
+          }, 120000);
+          approvals.set(aid, {
+            sessionId: id,
+            decide: (allowed) => {
+              clearTimeout(timer);
+              approvals.delete(aid);
+              resolve(Boolean(allowed));
+            },
+          });
+        });
+      };
+      const result = await runOpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        model: config.openaiModel,
+        effort: config.effort,
+        prompt: originalPrompt || "Analise as imagens anexadas.",
+        attachments,
+        previousResponseId: s.openaiResponseId,
+        instructions:
+          config.systemInstructions +
+          `\nWorkspace local: ${config.workspace}. Vault: ${config.vault || "nÃ£o configurado"}. Use as ferramentas MCP disponÃ­veis quando necessÃ¡rio. Nunca revele segredos.`,
+        mcpConfigPaths: config.mcpConfigPaths,
+        signal: ctrl.signal,
+        approve: askApproval,
+        onTool: (name, input) =>
+          send(res, "tool", { name, input: redact(input) }),
+      });
+      finalText = result.text;
+      s.openaiResponseId = result.responseId;
+      send(res, "text", { text: finalText });
+      await persistAssistant();
+      send(res, "result", {
+        subtype: "openai_response",
+        costUsd: 0,
+        usage: result.usage,
+        isError: false,
+      });
+    } else {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
-    const extra = [config.vault, ...config.additionalDirectories].filter(
+    const extra = [config.vault, ATTACHMENTS, ...config.additionalDirectories].filter(
       (p) => p && existsSync(p),
     );
     const opts = {
@@ -179,11 +469,10 @@ async function runAgent(req, res) {
           "\nFollow the project instructions and persistent memory files. Never print secrets.",
       },
       additionalDirectories: extra,
-      maxTurns: config.maxTurns,
-      maxBudgetUsd: config.maxBudgetUsd,
       abortController: ctrl,
       permissionMode: "default",
       includePartialMessages: false,
+      pathToClaudeCodeExecutable: resolveClaudeCodeExecutable(),
     };
     if (s.claudeSessionId) opts.resume = s.claudeSessionId;
     if (config.pluginPaths.length)
@@ -194,13 +483,13 @@ async function runAgent(req, res) {
       opts.mcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
     opts.canUseTool = async (toolName, input) => {
       if (ctrl.signal.aborted)
-        return { behavior: "deny", message: "Execução cancelada" };
+        return { behavior: "deny", message: "ExecuÃ§Ã£o cancelada" };
       const aid = randomUUID();
       send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
       return await new Promise((resolve) => {
         const timer = setTimeout(() => {
           approvals.delete(aid);
-          resolve({ behavior: "deny", message: "Aprovação expirou" });
+          resolve({ behavior: "deny", message: "AprovaÃ§Ã£o expirou" });
         }, 120000);
         approvals.set(aid, {
           sessionId: id,
@@ -210,19 +499,38 @@ async function runAgent(req, res) {
             resolve(
               allowed
                 ? { behavior: "allow", updatedInput: input }
-                : { behavior: "deny", message: "Negado pelo usuário" },
+                : { behavior: "deny", message: "Negado pelo usuÃ¡rio" },
             );
           },
         });
       });
     };
-    for await (const m of query({ prompt, options: opts })) {
+    let effectivePrompt = prompt;
+    if (historyForRebuild.length) {
+      const rebuilt = historyForRebuild
+        .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
+        .slice(-80)
+        .map((m) => "[" + (m.role === "user" ? "Usuário" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
+        .join("\n\n");
+      effectivePrompt = "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + prompt;
+    }
+    const q = query({ prompt: effectivePrompt, options: opts });
+    const runningEntry = active.get(id);
+    if (runningEntry) {
+      runningEntry.query = q;
+      for (const queued of runningEntry.pendingInputs.splice(0)) {
+        async function* oneQueued() { yield queued; }
+        await q.streamInput(oneQueued());
+      }
+    }
+    for await (const m of q) {
       if (m.session_id) s.claudeSessionId = m.session_id;
       if (m.type === "assistant") {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
             finalText += b.text + "\n";
             send(res, "text", { text: b.text });
+            await persistAssistant();
           } else if (b.type === "tool_use")
             send(res, "tool", { name: b.name, input: redact(b.input) });
         }
@@ -242,18 +550,19 @@ async function runAgent(req, res) {
           mcpServers: m.mcp_servers || [],
         });
     }
-    s.messages.push({
-      role: "assistant",
-      text: finalText || "(Sem resposta textual)",
-      costUsd: spent,
-      at: new Date().toISOString(),
-    });
-    s.updatedAt = new Date().toISOString();
-    await saveJson(SESSIONS, sessions);
+    }
+    if (finalText.trim()) {
+      await persistAssistant();
+    } else {
+      s.messages.push({ role: "assistant", text: "(Sem resposta textual)", costUsd: spent, provider, at: new Date().toISOString() });
+      s.updatedAt = new Date().toISOString();
+      await saveJson(SESSIONS, sessions);
+    }
     send(res, "done", { sessionId: id });
   } catch (e) {
     const msg = String(e?.message || e);
     send(res, "error", { error: msg.slice(0, 3000) });
+    if(finalText.trim()) await persistAssistant();
     s.messages.push({
       role: "system",
       text: "Erro: " + msg.slice(0, 2000),
@@ -291,12 +600,19 @@ async function findPluginPaths(root, depth = 0) {
 async function discover() {
   const home = homedir(),
     claude = join(home, ".claude");
+  const detectedControllerPath =
+    config.pcControllerPath && existsSync(join(config.pcControllerPath, "tunnel-client.exe"))
+      ? config.pcControllerPath
+      : defaultControllerPath();
   const candidates = [
     join(home, "Documents", "AI_Memory_Vault"),
     join(home, "OneDrive", "Documents", "AI_Memory_Vault"),
     join(home, "OneDrive", "Documentos", "AI_Memory_Vault"),
   ];
   const pluginRoot = join(claude, "plugins");
+  const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
+  const pcControllerMcp = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
+  const localPc = await localPcControllerStatus(Boolean(pcControllerMcp));
   return {
     platform: platform(),
     home,
@@ -316,7 +632,28 @@ async function discover() {
     pluginPaths: await findPluginPaths(join(pluginRoot, "cache")),
     workspaceExists: Boolean(config.workspace && existsSync(config.workspace)),
     vaultExists: Boolean(config.vault && existsSync(config.vault)),
-    apiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
+    apiKeyConfigured: Boolean(
+      config.provider === "openai"
+        ? process.env.OPENAI_API_KEY
+        : process.env.ANTHROPIC_API_KEY,
+    ),
+    providerKeys: {
+      anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+      openai: Boolean(process.env.OPENAI_API_KEY),
+    },
+    pcController: {
+      installed: Boolean(detectedControllerPath),
+      localMcpConfigured: Boolean(pcControllerMcp),
+      localMcpCommand: pcControllerMcp?.command || null,
+      localState: localPc.state,
+      localConnected: localPc.connected,
+      localMessage: localPc.message,
+      localToolCount: localPc.toolCount,
+      localLastOkAt: localPc.lastOkAt,
+      localLastError: localPc.lastError,
+      runtimeKeyConfigured: Boolean(process.env.NOCTAN_TUNNEL_RUNTIME_KEY),
+      ...(await tunnelStatusLive(config.tunnelProfile)),
+    },
     activeSessions: [...active.keys()],
   };
 }
@@ -325,26 +662,84 @@ async function staticFile(res, path) {
     "/": "index.html",
     "/app.js": "app.js",
     "/style.css": "style.css",
+    "/noctan-mark.png": "noctan-mark.png",
   };
-  if (!files[path]) return json(res, 404, { error: "Não encontrado" });
+  if (!files[path]) return json(res, 404, { error: "NÃ£o encontrado" });
   const file = join(BASE, "public", files[path]);
   const ext = path.endsWith(".js")
     ? "text/javascript"
     : path.endsWith(".css")
       ? "text/css"
-      : "text/html";
+      : path.endsWith(".png")
+        ? "image/png"
+        : "text/html";
   res.writeHead(200, {
-    "content-type": ext + "; charset=utf-8",
+    "content-type": ext.startsWith("text/") ? ext + "; charset=utf-8" : ext,
     "cache-control": "no-store",
     "content-security-policy":
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws://127.0.0.1:" + PORT + " ws://localhost:" + PORT + "; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     "x-content-type-options": "nosniff",
   });
   res.end(await readFile(file));
 }
+async function migrateLegacyData() {
+  const legacyPaths = [
+    ...(process.env.APPDATA ? [join(process.env.APPDATA, "Claude X", "data")] : []),
+    join(BASE, "data"),
+  ].filter(p => resolve(p) !== resolve(DATA));
+  if (!existsSync(CONFIG)) {
+    for (const oldDir of legacyPaths) {
+      const oldConfig = await loadJson(join(oldDir, "config.json"), null);
+      if (oldConfig && typeof oldConfig.workspace === "string") {
+        await saveJson(CONFIG, oldConfig);
+        break;
+      }
+    }
+  }
+  const all = await loadJson(SESSIONS, {});
+  let changed = false;
+  for (const oldDir of legacyPaths) {
+    const past = await loadJson(join(oldDir, "sessions.json"), {});
+    for (const [id, item] of Object.entries(past)) {
+      if (!item || !Array.isArray(item.messages)) continue;
+      if (!all[id] || String(item.updatedAt || "") > String(all[id].updatedAt || "")) {
+        all[id] = item;
+        changed = true;
+      }
+    }
+  }
+  if (changed) await saveJson(SESSIONS, all);
+}
 await mkdir(DATA, { recursive: true });
+await migrateLegacyData();
 config = cleanConfig(await loadJson(CONFIG, defaults));
 sessions = await loadJson(SESSIONS, {});
+if (!process.env.ANTHROPIC_API_KEY && existsSync(SECRET_FILE)) {
+  try { process.env.ANTHROPIC_API_KEY = await loadApiKey(SECRET_FILE, "anthropic"); }
+  catch { console.warn("Noctan: protected key unavailable for this Windows user."); }
+}
+if (!process.env.OPENAI_API_KEY && existsSync(OPENAI_SECRET_FILE)) {
+  try { process.env.OPENAI_API_KEY = await loadApiKey(OPENAI_SECRET_FILE, "openai"); }
+  catch { console.warn("Noctan: protected OpenAI key unavailable for this Windows user."); }
+}
+if (!process.env.NOCTAN_TUNNEL_RUNTIME_KEY && existsSync(TUNNEL_SECRET_FILE)) {
+  try { process.env.NOCTAN_TUNNEL_RUNTIME_KEY = await loadApiKey(TUNNEL_SECRET_FILE, "tunnel"); }
+  catch { console.warn("Noctan: protected tunnel key unavailable for this Windows user."); }
+}
+if (config.autoStartTunnel && process.env.NOCTAN_TUNNEL_RUNTIME_KEY) {
+  try {
+    await startTunnel({ controllerPath: config.pcControllerPath, profile: config.tunnelProfile, runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY });
+  } catch (error) {
+    console.warn(`Noctan: PC Controller nÃ£o iniciou: ${error.message}`);
+  }
+}
+try {
+  const bootMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
+  const bootPcController = bootMcpServers["pc-controller"] || bootMcpServers["pc_controller"] || null;
+  if (bootPcController) connectLocalPcController(bootPcController).catch((error) => console.warn(`Noctan: PC Controller local nÃ£o iniciou: ${error.message}`));
+} catch (error) {
+  console.warn(`Noctan: falha preparando PC Controller local: ${error.message}`);
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
@@ -355,8 +750,11 @@ const server = http.createServer(async (req, res) => {
         req.headers.origin,
       )
     )
-      return json(res, 403, { error: "Origem não autorizada" });
-    if (req.method === "GET" && ["/", "/app.js", "/style.css"].includes(path))
+      return json(res, 403, { error: "Origem nÃ£o autorizada" });
+    if (
+      req.method === "GET" &&
+      ["/", "/app.js", "/style.css", "/noctan-mark.png"].includes(path)
+    )
       return await staticFile(res, path);
     if (req.method === "GET" && path === "/api/status")
       return json(res, 200, {
@@ -364,6 +762,7 @@ const server = http.createServer(async (req, res) => {
         config,
         sessionCount: Object.keys(sessions).length,
       });
+    if (req.method === "GET" && path.startsWith("/api/sessions")) sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
     if (req.method === "GET" && path === "/api/sessions")
       return json(
         res,
@@ -376,17 +775,80 @@ const server = http.createServer(async (req, res) => {
       return json(
         res,
         sessions[path.split("/").pop()] ? 200 : 404,
-        sessions[path.split("/").pop()] || { error: "Não encontrada" },
+        sessions[path.split("/").pop()] || { error: "NÃ£o encontrada" },
       );
+
+    if (req.method === "DELETE" && path.startsWith("/api/sessions/")) {
+      const id = path.split("/").pop();
+      try {
+        const deleted = await deleteSessionById(id);
+        return json(res, deleted ? 200 : 404, deleted ? { ok: true, id } : { error: "Conversa não encontrada" });
+      } catch (error) {
+        return json(res, /execução/.test(String(error.message)) ? 409 : 500, { error: String(error.message || error) });
+      }
+    }
     if (req.method === "POST" && path === "/api/connect") {
       const b = await readBody(req),
-        key = String(b.key || "").trim();
-      if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key))
-        return json(res, 400, {
-          error: "A chave não parece ser uma chave válida da Anthropic.",
-        });
-      process.env.ANTHROPIC_API_KEY = key;
-      return json(res, 200, { ok: true, apiKeyConfigured: true });
+        key = String(b.key || "").trim(),
+        provider = b.provider === "openai" ? "openai" : "anthropic";
+      const destination = provider === "openai" ? OPENAI_SECRET_FILE : SECRET_FILE;
+      await saveApiKey(key, destination, provider);
+      if (provider === "openai") process.env.OPENAI_API_KEY = key;
+      else process.env.ANTHROPIC_API_KEY = key;
+      return json(res, 200, { ok: true, provider, apiKeyConfigured: true, persisted: true });
+    }
+    if (req.method === "DELETE" && path === "/api/connect") {
+      const b = await readBody(req).catch(() => ({}));
+      const provider = b.provider === "openai" ? "openai" : "anthropic";
+      await removeApiKey(provider === "openai" ? OPENAI_SECRET_FILE : SECRET_FILE);
+      if (provider === "openai") delete process.env.OPENAI_API_KEY;
+      else delete process.env.ANTHROPIC_API_KEY;
+      return json(res, 200, { ok: true, provider, apiKeyConfigured: false });
+    }
+    if (req.method === "POST" && path === "/api/pc-controller/connect") {
+      const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
+      const definition = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
+      if (!definition) return json(res, 409, { error: "PC Controller nÃ£o configurado nos MCPs." });
+      return json(res, 200, await connectLocalPcController(definition));
+    }
+    if (req.method === "POST" && path === "/api/pc-controller/disconnect")
+      return json(res, 200, await disconnectLocalPcController());
+    if (req.method === "GET" && path === "/api/pc-controller/status") {
+      const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
+      const definition = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
+      return json(res, 200, await localPcControllerStatus(Boolean(definition)));
+    }
+    if (req.method === "POST" && path === "/api/tunnel/connect") {
+      const body = await readBody(req);
+      const key = String(body.runtimeKey || "").trim();
+      if (key) {
+        await saveApiKey(key, TUNNEL_SECRET_FILE, "tunnel");
+        process.env.NOCTAN_TUNNEL_RUNTIME_KEY = key;
+      }
+      config = cleanConfig({
+        ...config,
+        pcControllerPath: body.controllerPath || config.pcControllerPath || defaultControllerPath(),
+        tunnelProfile: body.profile || config.tunnelProfile,
+        autoStartTunnel: body.autoStart !== false,
+      });
+      await saveJson(CONFIG, config);
+      const status = await startTunnel({
+        controllerPath: config.pcControllerPath,
+        profile: config.tunnelProfile,
+        runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY,
+      });
+      return json(res, 200, { ok: true, status });
+    }
+    if (req.method === "POST" && path === "/api/tunnel/disconnect")
+      return json(res, 200, { ok: true, status: stopTunnel() });
+    if (req.method === "GET" && path === "/api/tunnel/status")
+      return json(res, 200, await tunnelStatusLive(config.tunnelProfile));
+    if (req.method === "POST" && path === "/api/preferences/microphone") {
+      const body = await readBody(req);
+      config = cleanConfig({ ...config, microphoneId: String(body.deviceId || "default").slice(0,512),
+        microphoneLabel: String(body.label || "").slice(0,512) });
+      await saveJson(CONFIG, config);
+      return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && path === "/api/autoconfigure") {
       const detected = await discover();
@@ -403,19 +865,72 @@ const server = http.createServer(async (req, res) => {
       await saveJson(CONFIG, config);
       return json(res, 200, { ok: true, config });
     }
+    if (req.method === "POST" && path === "/api/handoff") {
+      const body = await readBody(req);
+      const prompt = String(body.prompt || "").trim();
+      if (!prompt || prompt.length > 40000)
+        return json(res, 400, { error: "Tarefa vazia ou muito longa." });
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      sessions[id] = {
+        id,
+        title: String(body.title || prompt).trim().slice(0, 65),
+        createdAt: now,
+        updatedAt: now,
+        messages: [],
+        pendingPrompt: prompt,
+        source: String(body.source || "mcp").slice(0, 80),
+      };
+      await saveJson(SESSIONS, sessions);
+      return json(res, 201, {
+        ok: true,
+        sessionId: id,
+        url: `http://${HOST}:${PORT}/?session=${id}`,
+      });
+    }
     if (req.method === "PUT" && path === "/api/config") {
       config = cleanConfig(await readBody(req));
       await saveJson(CONFIG, config);
       return json(res, 200, { ok: true, config });
     }
+    if (req.method === "POST" && path === "/api/follow-up") {
+      try {
+        const item = await pushLiveFollowUp(await readBody(req));
+        return json(res, 202, { ok: true, item });
+      } catch (error) {
+        return json(res, 409, { error: String(error.message || error) });
+      }
+    }
+    const noticeMatch = path.match(/^\/api\/sessions\/([^/]+)\/notice$/);
+    if (req.method === "POST" && noticeMatch) {
+      try {
+        const body = await readBody(req);
+        const item = await appendSessionNotice(noticeMatch[1], body.text, { kind: body.kind, model: body.model });
+        return json(res, 201, { ok: true, item });
+      } catch (error) {
+        return json(res, 400, { error: String(error.message || error) });
+      }
+    }
+    const editMatch = path.match(/^\/api\/sessions\/([^/]+)\/messages\/(\d+)$/);
+    if (req.method === "PATCH" && editMatch) {
+      try {
+        const body = await readBody(req);
+        const result = await editSessionUserMessage(editMatch[1], Number(editMatch[2]), body.text);
+        return json(res, 200, { ok: true, index: result.index });
+      } catch (error) {
+        return json(res, /execução/.test(String(error.message)) ? 409 : 400, { error: String(error.message || error) });
+      }
+    }
     if (req.method === "POST" && path === "/api/run")
       return await runAgent(req, res);
+    if (req.method === "POST" && path === "/api/transcribe")
+      return await transcribeAudio(req, res);
     if (req.method === "POST" && path === "/api/approve") {
       const b = await readBody(req),
         a = approvals.get(b.id);
       if (!a)
         return json(res, 404, {
-          error: "Aprovação não encontrada ou expirada",
+          error: "AprovaÃ§Ã£o nÃ£o encontrada ou expirada",
         });
       a.decide(b.allow === true);
       return json(res, 200, { ok: true });
@@ -423,18 +938,78 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && path === "/api/cancel") {
       const b = await readBody(req),
         a = active.get(b.sessionId);
-      if (!a) return json(res, 404, { error: "Execução não encontrada" });
+      if (!a) return json(res, 404, { error: "ExecuÃ§Ã£o nÃ£o encontrada" });
       a.ctrl.abort();
       for (const [k, v] of approvals)
         if (v.sessionId === b.sessionId) v.decide(false);
       return json(res, 200, { ok: true });
     }
-    return json(res, 404, { error: "Rota não encontrada" });
+    return json(res, 404, { error: "Rota nÃ£o encontrada" });
   } catch (e) {
     if (!res.headersSent) respondError(res, e);
     else res.end();
   }
 });
 server.listen(PORT, HOST, () =>
-  console.log(`Claude X disponível em http://${HOST}:${PORT}`),
+  console.log(`Noctan disponÃ­vel em http://${HOST}:${PORT}`),
 );
+const { WebSocketServer } = await import("ws");
+const { Worker } = await import("node:worker_threads");
+const sttWss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
+const sttModelName = "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11";
+const sttModelLocations = [
+  join(DATA, "models", "sherpa", sttModelName),
+  join(BASE, "data", "models", "sherpa", sttModelName),
+];
+server.on("upgrade", (req, socket, head) => {
+  const origin = req.headers.origin;
+  if (req.url !== "/api/stt-stream" ||
+    (origin && !["http://127.0.0.1:" + PORT, "http://localhost:" + PORT].includes(origin))) {
+    socket.destroy();
+    return;
+  }
+  sttWss.handleUpgrade(req, socket, head, (ws) => sttWss.emit("connection", ws));
+});
+sttWss.on("connection", (ws) => {
+  const dir = sttModelLocations.find((root) => existsSync(join(root, "encoder.int8.onnx")) && existsSync(join(root, "tokens.txt")));
+  if (!dir) {
+    ws.send(JSON.stringify({ type: "error", error: "O modelo de voz Nemotron ainda nao foi instalado. Aguarde o download." }));
+    ws.close(1013, "model unavailable");
+    return;
+  }
+  const worker = new Worker(new URL("./realtime-stt-worker.mjs", import.meta.url), { workerData: { modelDir: dir } });
+  let disposed = false;
+  const timer = setTimeout(() => {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: "error", error: "Tempo esgotado carregando Nemotron." }));
+    ws.close();
+  }, 30000);
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    clearTimeout(timer);
+    worker.terminate().catch(() => {});
+  };
+  worker.on("message", (msg) => {
+    if (msg.type === "ready") clearTimeout(timer);
+    if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+    if (msg.type === "final" || msg.type === "error") {
+      setTimeout(() => { if (ws.readyState === 1) ws.close(); }, 100);
+    }
+  });
+  worker.on("error", (error) => {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: "error", error: String(error.message) }));
+    ws.close();
+  });
+  worker.on("exit", () => { if (ws.readyState === 1) ws.close(); });
+  ws.on("message", (buffer, binary) => {
+    if (!binary) {
+      try {
+        if (JSON.parse(buffer.toString()).type === "finish") worker.postMessage({ type: "finish" });
+      } catch {}
+    } else if (buffer.byteLength <= 65536) {
+      worker.postMessage({ type: "audio", audio: buffer });
+    }
+  });
+  ws.on("close", dispose);
+  ws.on("error", dispose);
+});
