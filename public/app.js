@@ -1490,3 +1490,35 @@ refresh()
 
 
 setTimeout(() => prewarmStt().catch(() => {}), 600);
+
+function renderUpdaterStatus(status = {}) {
+  const button = $("updateBtn");
+  if (!button) return;
+  const current = status.status || "idle";
+  button.disabled = current === "checking" || current === "downloading";
+  if (current === "checking") button.textContent = "↻ Verificando...";
+  else if (current === "available" || current === "downloading") button.textContent = "↓ " + (status.message || "Baixando atualização...");
+  else if (current === "downloaded") button.textContent = "↻ Reiniciar para atualizar";
+  else if (current === "error") button.textContent = "⚠ Atualizações";
+  else button.textContent = "↻ Atualizações";
+  button.title = status.message || "Verificar atualizações";
+}
+if (window.noctanUpdater) {
+  window.noctanUpdater.getStatus().then(renderUpdaterStatus).catch(() => {});
+  window.noctanUpdater.onStatus(renderUpdaterStatus);
+  $("updateBtn").onclick = async () => {
+    const status = await window.noctanUpdater.getStatus();
+    if (status.status === "downloaded") {
+      await window.noctanUpdater.installNow();
+      return;
+    }
+    renderUpdaterStatus({ status: "checking", message: "Verificando atualização..." });
+    try {
+      renderUpdaterStatus(await window.noctanUpdater.checkNow());
+    } catch (error) {
+      renderUpdaterStatus({ status: "error", message: error.message });
+    }
+  };
+} else if ($("updateBtn")) {
+  $("updateBtn").hidden = true;
+}

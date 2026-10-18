@@ -1,11 +1,114 @@
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
+import updaterPackage from "electron-updater";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
-import { mkdir, copyFile } from "node:fs/promises";
-import { homedir } from "node:os";
 
+const { autoUpdater } = updaterPackage;
 const APP_PORT = Number(process.env.PORT || 4177);
 const APP_URL = `http://127.0.0.1:${APP_PORT}`;
+
+const updateState = {
+  status: "idle",
+  currentVersion: app.getVersion(),
+  availableVersion: null,
+  percent: 0,
+  message: "",
+};
+
+function broadcastUpdateStatus() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send("updater:status", { ...updateState });
+  }
+}
+
+function setUpdateState(patch) {
+  Object.assign(updateState, patch);
+  broadcastUpdateStatus();
+}
+
+async function setupAutoUpdater() {
+  ipcMain.handle("updater:get-status", () => ({ ...updateState }));
+
+  ipcMain.handle("updater:check", async () => {
+    if (!app.isPackaged) return { ...updateState };
+    await autoUpdater.checkForUpdates();
+    return { ...updateState };
+  });
+
+  ipcMain.handle("updater:install", () => {
+    if (updateState.status !== "downloaded") {
+      return { ok: false, status: updateState.status };
+    }
+    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+    return { ok: true };
+  });
+
+  if (!app.isPackaged) {
+    setUpdateState({
+      status: "dev",
+      message: "Atualizações automáticas só funcionam no app instalado.",
+    });
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on("checking-for-update", () => {
+    setUpdateState({ status: "checking", message: "Verificando atualização..." });
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    setUpdateState({
+      status: "available",
+      availableVersion: info.version,
+      message: `Baixando Noctan v${info.version}...`,
+    });
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    setUpdateState({
+      status: "current",
+      availableVersion: info?.version || null,
+      percent: 0,
+      message: "Noctan está atualizado.",
+    });
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    setUpdateState({
+      status: "downloading",
+      percent,
+      message: `Baixando atualização... ${Math.round(percent)}%`,
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    setUpdateState({
+      status: "downloaded",
+      availableVersion: info.version,
+      percent: 100,
+      message: `Noctan v${info.version} pronto para instalar.`,
+    });
+  });
+
+  autoUpdater.on("error", (error) => {
+    setUpdateState({
+      status: "error",
+      message: String(error?.message || error).slice(0, 500),
+    });
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((error) => {
+      setUpdateState({
+        status: "error",
+        message: String(error?.message || error).slice(0, 500),
+      });
+    });
+  }, 2500);
+}
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -44,12 +147,11 @@ async function createWindow(targetUrl = APP_URL) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: join(app.getAppPath(), "preload.cjs"),
       webviewTag: true,
     },
   });
 
-  // Only the trusted local Noctan origin can request microphone access.
-  // Chromium persists the grant inside the Electron app profile; Windows can still deny it.
   const localOrigin = new URL(APP_URL).origin;
   const localMediaRequest = (webContents, permission, requestingOrigin, details = {}) => {
     if (permission !== "media") return false;
@@ -59,9 +161,11 @@ async function createWindow(targetUrl = APP_URL) {
       ? (!types.length || (types.includes("audio") && !types.includes("video")))
       : false;
   };
+
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => {
     callback(localMediaRequest(contents, permission, details.requestingUrl, details));
   });
+
   window.webContents.session.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
     return localMediaRequest(contents, permission, requestingOrigin, details);
   });
@@ -95,16 +199,19 @@ async function createWindow(targetUrl = APP_URL) {
     if (url.startsWith("https://")) shell.openExternal(url);
     return { action: "deny" };
   });
+
   window.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(APP_URL)) event.preventDefault();
   });
+
   await window.loadURL(targetUrl);
 }
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     app.setAppUserModelId("app.noctan.desktop");
+    await setupAutoUpdater();
     return createWindow();
   })
   .catch((error) => {
