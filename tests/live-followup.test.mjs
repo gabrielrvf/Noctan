@@ -17,7 +17,7 @@ test('active Claude session accepts additive live steering', () => {
 
 test('live follow-up stays after current assistant response and before progress', () => {
   assert.doesNotMatch(app, /activeAssistantBubble/);
-  assert.match(app, /message\("user", prompt\);\n    keepProgressLast\(\);/);
+  assert.match(app, /message\("user", prompt\);\r?\n    keepProgressLast\(\);/);
   assert.match(server, /session\.messages\.push\(item\); session\.updatedAt = item\.at/);
 });
 
