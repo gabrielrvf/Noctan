@@ -427,6 +427,7 @@ function newSession() {
   $("chat").append(d);
   updateSessions();
 }
+let assistantSegmentEpoch = 0;
 let progressUI=null;
 let progressStarted=0;
 let progressTicker=null;
@@ -548,6 +549,7 @@ async function send() {
     resetPromptNavigation();
     $("prompt").value = "";
     message("user", prompt);
+    assistantSegmentEpoch += 1;
     keepProgressLast();
     try {
       await request("/api/follow-up", { method: "POST", body: JSON.stringify({ sessionId: state.current, prompt }) });
@@ -573,6 +575,7 @@ async function send() {
   beginProgress();
   let response = null;
   let assistant = null;
+  let assistantSegmentSeen = assistantSegmentEpoch;
   try {
     response = await fetch("/api/run", {
       method: "POST",
@@ -619,6 +622,10 @@ async function send() {
         }
         if (type === "text") {
           updateProgress("Respondendo");
+          if (assistantSegmentSeen !== assistantSegmentEpoch) {
+            assistant = null;
+            assistantSegmentSeen = assistantSegmentEpoch;
+          }
           if (!assistant) assistant = message("assistant", "");
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);

@@ -177,6 +177,7 @@ async function pushLiveFollowUp(body) {
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
   if (!session) throw Error("Conversa não encontrada");
+  running.segmentBreakRequested = true;
   const item = { role: "user", text, provider: "anthropic", liveFollowUp: true, at: new Date().toISOString() };
   session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
   await saveJson(SESSIONS, sessions);
@@ -394,12 +395,14 @@ async function runAgent(req, res) {
   });
   send(res, "start", { sessionId: id });
   const ctrl = new AbortController();
-  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider, autoApproveAll: false });
+  active.set(id, { ctrl, res, query: null, pendingInputs: [], provider, autoApproveAll: false, segmentBreakRequested: false, segmentStart: 0 });
   let finalText = "",
     spent = 0,
     assistantRecord = null;
   const persistAssistant = async () => {
-    const text = finalText.trim();
+    const running = active.get(id);
+    const segmentStart = Number(running?.segmentStart || 0);
+    const text = finalText.slice(segmentStart).trim();
     if (!text) return;
     if (!assistantRecord) {
       assistantRecord = { role: "assistant", text, costUsd: spent, provider, at: new Date().toISOString() };
@@ -496,6 +499,8 @@ async function runAgent(req, res) {
     opts.canUseTool = async (toolName, input) => {
       if (ctrl.signal.aborted)
         return { behavior: "deny", message: "ExecuÃ§Ã£o cancelada" };
+      if (active.get(id)?.autoApproveAll)
+        return { behavior: "allow", updatedInput: input };
       const aid = randomUUID();
       send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
       return await new Promise((resolve) => {
@@ -546,6 +551,12 @@ async function runAgent(req, res) {
       if (m.type === "assistant") {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
+            const liveRun = active.get(id);
+            if (liveRun?.segmentBreakRequested) {
+              assistantRecord = null;
+              liveRun.segmentStart = finalText.length;
+              liveRun.segmentBreakRequested = false;
+            }
             finalText += b.text + "\n";
             send(res, "text", { text: b.text });
             await persistAssistant();

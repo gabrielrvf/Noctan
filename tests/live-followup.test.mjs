@@ -15,10 +15,14 @@ test('active Claude session accepts additive live steering', () => {
   assert.match(app, /request\("\/api\/follow-up"/);
 });
 
-test('live follow-up stays after current assistant response and before progress', () => {
-  assert.doesNotMatch(app, /activeAssistantBubble/);
-  assert.match(app, /message\("user", prompt\);\r?\n    keepProgressLast\(\);/);
-  assert.match(server, /session\.messages\.push\(item\); session\.updatedAt = item\.at/);
+test('live follow-up starts the next assistant text in a new bubble below the follow-up', () => {
+  assert.match(app, /assistantSegmentEpoch \+= 1/);
+  assert.match(app, /assistantSegmentSeen !== assistantSegmentEpoch/);
+  assert.match(app, /assistant = null/);
+  assert.match(server, /segmentBreakRequested: false/);
+  assert.match(server, /running\.segmentBreakRequested = true/);
+  assert.match(server, /liveRun\.segmentStart = finalText\.length/);
+  assert.match(server, /finalText\.slice\(segmentStart\)/);
 });
 
 test('editing a user message branches and rebuilds context', () => {

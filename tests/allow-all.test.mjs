@@ -13,6 +13,7 @@ test('approval UI exposes session-scoped allow all', () => {
 test('allow all auto-approves future tools only for the active run', () => {
   assert.match(server, /autoApproveAll: false/);
   assert.match(server, /active\.get\(id\)\?\.autoApproveAll/);
+  assert.match(server, /return \{ behavior: "allow", updatedInput: input \}/);
   assert.match(server, /run\.autoApproveAll = true/);
   assert.match(server, /pending\.sessionId === a\.sessionId/);
   assert.match(server, /active\.delete\(id\)/);

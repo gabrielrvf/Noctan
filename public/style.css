@@ -502,15 +502,26 @@ h1 {
 }
 .micControl {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  height: 30px;
+  line-height: 1;
   border: 1px solid #3a3a3a;
   border-radius: 15px;
   background: #202020;
+  overflow: visible;
 }
 .micControl .iconButton {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  min-width: 30px;
+  min-height: 28px;
+  padding: 0;
+  line-height: 1;
   border: 0;
   border-radius: 15px 0 0 15px;
   background: transparent;
@@ -522,8 +533,10 @@ h1 {
 }
 .micButton svg {
   display: block;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  transform: none;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -532,11 +545,16 @@ h1 {
   vertical-align: middle;
 }
 .micArrow {
-  display: grid;
-  place-items: center;
-  width: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
   height: 28px;
-  padding: 0 4px 2px 2px;
+  min-width: 24px;
+  min-height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
   border: 0;
   border-left: 1px solid #393939;
   border-radius: 0 15px 15px 0;
@@ -1044,3 +1062,5 @@ h1 {
 .message.user{position:relative;padding-right:42px}
 .messageEdit{position:absolute;right:8px;top:8px;width:26px;height:26px;padding:0;border:0;border-radius:7px;display:flex;align-items:center;justify-content:center;background:transparent;color:#9a9a9f;cursor:pointer;font-size:15px;line-height:1}
 .messageEdit:hover{background:#3a3a3a;color:#fff}
+
+#runStatus{display:inline-flex;align-items:center;min-height:28px;line-height:1.2;margin-left:2px}
