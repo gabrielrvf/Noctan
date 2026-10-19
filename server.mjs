@@ -949,6 +949,18 @@ if (config.autoStartTunnel && process.env.NOCTAN_TUNNEL_RUNTIME_KEY) {
     console.warn(`Noctan: PC Controller nÃƒÆ’Ã‚Â£o iniciou: ${error.message}`);
   }
 }
+// Vigia do túnel do ChatGPT (2026-10-19): se cair (rede, sono do PC, processo morto), sobe de novo sozinho a cada
+// minuto enquanto o autoStart estiver ligado. Ninguém precisa abrir CMD nem clicar.
+setInterval(async () => {
+  if (!config.autoStartTunnel || !process.env.NOCTAN_TUNNEL_RUNTIME_KEY) return;
+  try {
+    const st = await tunnelStatusLive(config.tunnelProfile);
+    if (st.status === "connected" || st.status === "connecting" || st.pid) return;
+    await startTunnel({ controllerPath: config.pcControllerPath, profile: config.tunnelProfile, runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY });
+  } catch (error) {
+    console.warn(`Noctan: vigia do PC Controller: ${error.message}`);
+  }
+}, 60_000).unref();
 try {
   const bootMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
   const bootPcController = bootMcpServers["pc-controller"] || bootMcpServers["pc_controller"] || null;

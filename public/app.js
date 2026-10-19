@@ -338,14 +338,19 @@ function updateTunnelUI() {
   const tunnelConnected = tunnelState === "connected";
   const localConnected = Boolean(pc.localConnected);
   const busy = pcReconnectInProgress || ["connecting", "stopping"].includes(tunnelState) || ["connecting", "stopping"].includes(localState);
-  const connected = localConnected || tunnelConnected;
+  // Verde só com tudo de pé: o local (Noctan) se configurado E o túnel (ChatGPT) se a Runtime Key existe.
+  // Antes bastava um dos dois e o botão ficava verde com o ChatGPT sem acesso (2026-10-19).
+  const needLocal = Boolean(pc.localMcpConfigured);
+  const needTunnel = Boolean(pc.runtimeKeyConfigured);
+  const connected = (localConnected || !needLocal) && (tunnelConnected || !needTunnel) && (localConnected || tunnelConnected);
   const failed = !busy && !connected;
   $("pcControllerDot").className = busy ? "connecting" : connected ? "connected" : failed ? "error" : "";
   $("pcControllerBtn").classList.toggle("connected", connected);
+  const down = [needLocal && !localConnected ? "local (Noctan)" : "", needTunnel && !tunnelConnected ? "túnel do ChatGPT" : ""].filter(Boolean).join(" e ");
   $("pcControllerBtn").title = connected
-    ? `PC Controller conectado  -  ${pc.localToolCount || 0} ferramentas`
+    ? `PC Controller conectado  -  ${pc.localToolCount || 0} ferramentas${needTunnel ? " · ChatGPT ok" : ""}`
     : busy ? "PC Controller conectando..."
-      : (pc.lastError || pc.localLastError || pc.message || pc.localMessage || "PC Controller desconectado - clique para reconectar");
+      : `Fora do ar: ${down || "PC Controller"}. ${pc.lastError || pc.localLastError || pc.message || pc.localMessage || ""} Clique para reconectar.`.trim();
 }
 let pcReconnectInProgress = false;
 async function refreshPcControllerHealth() {

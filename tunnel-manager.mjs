@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -48,6 +48,47 @@ function profilePath(profileName) {
     "tunnel-client",
     `${profileName || "mcp-chatgpt-full-pc-dev"}.yaml`,
   );
+}
+
+/** Caminho curto do Windows (8.3), sem espaços. Sem 8.3 disponível, devolve o original. */
+function shortPath(path) {
+  try {
+    const out = execFileSync("cmd.exe", ["/d", "/c", `for %I in ("${path}") do @echo %~sI`], { encoding: "utf8", windowsHide: true }).trim();
+    return out && !out.includes(" ") ? out.replace(/\\/g, "/") : path;
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * Conserta o profile antes de subir (2026-10-19, o túnel morria ao abrir o Noctan):
+ * 1. Hard link com a cópia do app Codex (AppData\Local\Packages\OpenAI.Codex_*): o tunnel-client recusa com
+ *    "too many levels of symbolic links". Recria o arquivo com o mesmo conteúdo, só neste Windows.
+ * 2. `command` com espaço sem aspas ("C:/Program Files/nodejs/node.exe ..."): o tunnel-client corta no espaço
+ *    ("exec: C:/Program"). Troca o executável pelo caminho curto.
+ * Devolve o que consertou (sem segredos), para o log/UI.
+ */
+export function repairProfile(profileName) {
+  const file = profilePath(profileName);
+  const fixed = [];
+  if (!existsSync(file)) return fixed;
+  let text = readFileSync(file, "utf8");
+  let linked = false;
+  try { linked = statSync(file).nlink > 1; } catch {}
+  text = text.replace(/(command:\s*["'])([A-Za-z]:[\\/][^"'\r\n]*?\.exe)(\s)/i, (all, head, exe, sep) => {
+    if (!exe.includes(" ") || !existsSync(exe)) return all;
+    const short = shortPath(exe);
+    if (short === exe) return all;
+    fixed.push("command com espaço");
+    return head + short + sep;
+  });
+  if (linked || fixed.length) {
+    // Apagar e escrever de novo desfaz o hard link (o outro nome continua com o conteúdo antigo, intacto).
+    rmSync(file, { force: true });
+    writeFileSync(file, text, "utf8");
+    if (linked) fixed.unshift("hard link com o Codex");
+  }
+  return fixed;
 }
 
 function profileHealthAddress(profileName) {
@@ -107,7 +148,8 @@ export async function tunnelStatusLive(profileName) {
     };
   }
 
-  if (!child || child.killed) {
+  // Processo morreu com erro: mantém "error" e o motivo (antes virava "parado" sem motivo e ninguém via a falha).
+  if ((!child || child.killed) && state.status !== "error") {
     state = {
       ...state,
       status: "stopped",
@@ -140,10 +182,12 @@ export async function startTunnel({ controllerPath, profile, runtimeKey }) {
     throw Error("Informe a Runtime API Key do Secure MCP Tunnel.");
   if (!existsSync(profilePath(profileName)))
     throw Error("O profile do PC Controller ainda não foi inicializado neste Windows.");
+  const repaired = repairProfile(profileName);
+  if (repaired.length) console.warn(`Noctan: profile do tunnel consertado (${repaired.join(", ")}).`);
 
   state = {
     status: "connecting",
-    message: "Conectando ao PC Controller...",
+    message: repaired.length ? `Conectando (consertado: ${repaired.join(", ")})...` : "Conectando ao PC Controller...",
     startedAt: null,
     lastError: "",
   };
