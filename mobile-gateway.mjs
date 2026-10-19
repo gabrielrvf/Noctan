@@ -18,7 +18,7 @@ if (!token) {
 }
 
 const allowed = (method, path) => {
-  if (method === "GET" && (path === "/api/status" || path === "/api/sessions" || path === "/api/pc-controller/status" || path === "/api/tunnel/status")) return true;
+  if (method === "GET" && (path === "/api/status" || path === "/api/sessions" || path === "/api/sessions-summary" || path === "/api/pc-controller/status" || path === "/api/tunnel/status")) return true;
   if (method === "GET" && path.startsWith("/api/sessions/") && path.split("/").length === 4) return true;
   if (method === "POST" && ["/api/run","/api/follow-up","/api/approve","/api/cancel"].includes(path)) return true;
   if (method === "PUT" && path === "/api/config") return true;

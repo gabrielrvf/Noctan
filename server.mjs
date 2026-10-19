@@ -866,6 +866,8 @@ const server = http.createServer(async (req, res) => {
         sessionCount: Object.keys(sessions).length,
       });
     if (req.method === "GET" && path.startsWith("/api/sessions")) sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
+    if (req.method === "GET" && path === "/api/sessions-summary")
+      return json(res, 200, Object.values(sessions).map((session) => { const view = sessionView(session); delete view.messages; return view; }).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)));
     if (req.method === "GET" && path === "/api/sessions")
       return json(
         res,
