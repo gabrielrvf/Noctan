@@ -104,14 +104,10 @@ function isMissingClaudeSessionError(value) {
 }
 function normalizeChromeCommand(value) {
   const prompt = String(value || "").trim();
-  if (!/^\/(?:chrome|anthropic-skills:chrome-browser)(?:\s+enable)?\s*$/i.test(prompt)) return prompt;
-  return [
-    "[Comando nativo do Noctan: conectar ao Chrome do usuário]",
-    "Use a integração MCP já conectada do plugin superpowers-chrome, especialmente a ferramenta mcp__plugin_superpowers-chrome_chrome__use_browser.",
-    "Conecte-se ao Chrome existente do usuário, preserve o perfil e login atuais e confirme a conexão listando as abas disponíveis.",
-    "Não abra um navegador separado e não responda que Claude in Chrome está indisponível apenas porque as ferramentas mcp__claude-in-chrome__* não existem.",
-  ].join("\n");
+  if (/^\/(?:chrome|anthropic-skills:chrome-browser)(?:\s+enable)?\s*$/i.test(prompt)) return "/chrome";
+  return prompt;
 }
+
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
@@ -260,9 +256,10 @@ async function pushLiveFollowUp(body) {
       savedAttachments.map((path) => "- " + path).join("\n")
     : "";
   const userContent = normalizeChromeCommand(text || "Analise os arquivos anexados.") + attachmentContext;
-  const steeringText =
-    "[Mensagem adicional do usuÃƒÂ¡rio durante a execuÃƒÂ§ÃƒÂ£o. Continue todas as tarefas e raciocÃƒÂ­nios jÃƒÂ¡ em andamento; nÃƒÂ£o cancele, substitua nem abandone o trabalho atual, a menos que o usuÃƒÂ¡rio peÃƒÂ§a explicitamente. Incorpore esta informaÃƒÂ§ÃƒÂ£o aos prÃƒÂ³ximos passos e faÃƒÂ§a tudo junto quando compatÃƒÂ­vel.]\n\n" +
-    userContent;
+  const isSlashCommand = /^\/[A-Za-z0-9:_-]+(?:\s.*)?$/.test(String(text || "").trim());
+  const steeringText = isSlashCommand
+    ? userContent
+    : "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" + userContent;
 
   const sdkMessage = {
     type: "user",

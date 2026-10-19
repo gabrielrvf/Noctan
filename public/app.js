@@ -34,7 +34,7 @@ function setSlashCommands(commands) {
   for (const item of commands) {
     const command = typeof item === "string" ? { name: item, description: "" } : item;
     const name = String(command.name || "").replace(/^\//, "").trim();
-    if (name) unique.set(name, { name, description: String(command.description || "") });
+    if (name) unique.set(name, { name, description: String(command.description || ""), argumentHint: String(command.argumentHint || ""), aliases: Array.isArray(command.aliases) ? command.aliases : [], builtin: Boolean(command.builtin) });
   }
   if (unique.size) state.slashCommands = [...unique.values()].sort((a,b) => a.name.localeCompare(b.name));
 }
@@ -44,10 +44,17 @@ function slashMatches() {
   const query = value.slice(1).toLowerCase();
   return state.slashCommands.filter(command => command.name.toLowerCase().includes(query)).slice(0,12);
 }
-function chooseSlash(command) {
-  $("prompt").value = "/" + command.name + " ";
+async function chooseSlash(command) {
+  const slash = "/" + command.name;
   show($("slashMenu"), false);
-  $("prompt").focus();
+  slashSelection = 0;
+  if (command.argumentHint && command.argumentHint.trim()) {
+    $("prompt").value = slash + " ";
+    $("prompt").focus();
+    return;
+  }
+  $("prompt").value = slash;
+  await send();
 }
 function renderSlashMenu() {
   const matches = slashMatches();
@@ -60,7 +67,7 @@ function renderSlashMenu() {
     button.type = "button";
     button.classList.toggle("selected", index === slashSelection);
     button.innerHTML = `<strong>/${escapeHtml(command.name)}</strong><span>${escapeHtml(command.description || "Comando do Claude")}</span>`;
-    button.onmousedown = event => { event.preventDefault(); chooseSlash(command); };
+    button.onmousedown = event => { event.preventDefault(); chooseSlash(command).catch((e) => note(e.message)); };
     menu.append(button);
   });
   show(menu, true);
@@ -1640,7 +1647,7 @@ $("prompt").onkeydown = (e) => {
   if (slash.length && ["ArrowUp","ArrowDown","Tab","Enter"].includes(e.key)) {
     if (e.key === "ArrowUp") slashSelection = (slashSelection - 1 + slash.length) % slash.length;
     else if (e.key === "ArrowDown") slashSelection = (slashSelection + 1) % slash.length;
-    else chooseSlash(slash[slashSelection]);
+    else chooseSlash(slash[slashSelection]).catch((error) => note(error.message));
     e.preventDefault();
     renderSlashMenu();
     return;

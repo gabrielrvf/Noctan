@@ -89,3 +89,11 @@ test("send preflights liveActive and converts run races into follow-up", () => {
   assert.match(app, /response\.status === 409/);
   assert.match(app, /request\("\/api\/follow-up"/);
 });
+
+test("native chrome command is not rewritten to third-party browser MCP", () => {
+  assert.match(server, /return "\/chrome"/);
+  assert.doesNotMatch(server, /Use a integra.*superpowers-chrome/);
+  assert.match(server, /extraArgs: \{ chrome: null \}/);
+  assert.match(server, /const isSlashCommand =/);
+  assert.match(server, /\? userContent/);
+});
