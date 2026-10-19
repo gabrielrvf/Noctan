@@ -25,3 +25,20 @@ test("a lock left by a killed process (app update) is reclaimed", () => {
   assert.match(server, /takeSessionsLock/);
   assert.match(server, /age > 30000/);
 });
+
+test("history merge keeps the most complete snapshot and never drops distinct messages", async () => {
+  const start = server.indexOf("function normalizedMessageText");
+  const end = server.indexOf("function mergeSessions(");
+  assert.ok(start > 0 && end > start);
+  const isNoisyAgentCrashMessage = () => false;
+  const mergeMessageLists = new Function("isNoisyAgentCrashMessage", server.slice(start, end) + "; return mergeMessageLists;")(isNoisyAgentCrashMessage);
+  const at = "2026-10-19T16:27:56.828Z";
+  const disk = [{ role: "assistant", at, text: "Vou fazer" }];
+  const memory = [{ role: "assistant", at, text: "Vou fazer em duas frentes. Pronto." }];
+  assert.deepEqual(mergeMessageLists(memory, disk).map((m) => m.text), ["Vou fazer em duas frentes. Pronto."]);
+  assert.deepEqual(mergeMessageLists(disk, memory).map((m) => m.text), ["Vou fazer em duas frentes. Pronto."]);
+  const distinct = mergeMessageLists([{ role: "assistant", at, text: "A" }], [{ role: "assistant", at, text: "B" }]);
+  assert.equal(distinct.length, 2);
+  const users = mergeMessageLists([{ role: "user", at, text: "oi" }], [{ role: "user", at, text: "oi" }]);
+  assert.equal(users.length, 1);
+});

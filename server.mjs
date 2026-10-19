@@ -124,18 +124,51 @@ function shortAgentError(error) {
   }
   return raw.slice(0, 1000);
 }
+// A streaming assistant reply is checkpointed many times under the same `at`
+// while its text grows. Two copies with the same role+timestamp are the same
+// message when one text contains the other: keep the most complete one. Copies
+// whose texts are unrelated are distinct messages and are both preserved, so a
+// merge can never shorten the visible history or drop the latest checkpoint.
+function normalizedMessageText(msg) {
+  return String(msg?.text || "").replace(/\s+/g, " ").trim();
+}
+function sameMessageSnapshot(a, b) {
+  if (!a || !b || a.role !== b.role || String(a.at || "") !== String(b.at || "")) return false;
+  if (a.role !== "assistant" || !a.at) {
+    return a.text === b.text && a.costUsd === b.costUsd && a.kind === b.kind && a.name === b.name;
+  }
+  const ta = normalizedMessageText(a), tb = normalizedMessageText(b);
+  return ta === tb || ta.includes(tb) || tb.includes(ta);
+}
+function mergeMessageLists(...lists) {
+  const merged = [];
+  const byTime = new Map();
+  for (const list of lists) {
+    for (const msg of list || []) {
+      if (!msg || isNoisyAgentCrashMessage(msg)) continue;
+      const bucketKey = JSON.stringify([msg.role, msg.at || ""]);
+      const bucket = byTime.get(bucketKey) || [];
+      const index = bucket.find((i) => sameMessageSnapshot(merged[i], msg));
+      if (index === undefined) {
+        bucket.push(merged.length);
+        byTime.set(bucketKey, bucket);
+        merged.push(msg);
+      } else if (normalizedMessageText(msg).length >= normalizedMessageText(merged[index]).length) {
+        merged[index] = { ...merged[index], ...msg };
+      }
+    }
+  }
+  return merged
+    .map((msg, order) => ({ msg, order }))
+    .sort((a, b) => String(a.msg.at || "").localeCompare(String(b.msg.at || "")) || a.order - b.order)
+    .map(({ msg }) => msg);
+}
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
     const previous = merged[id];
     if (!previous) { merged[id] = current; continue; }
-    const found = new Map();
-    for (const msg of [...(previous.messages || []), ...(current.messages || [])]) {
-      if (isNoisyAgentCrashMessage(msg)) continue;
-      const key = msg.role === "assistant" && msg.at ? JSON.stringify([msg.role, msg.at]) : JSON.stringify([msg.role, msg.text, msg.at, msg.costUsd]);
-      found.set(key,msg);
-    }
-    const messages = [...found.values()].sort((a,b) => String(a.at || "").localeCompare(String(b.at || "")));
+    const messages = mergeMessageLists(previous.messages || [], current.messages || []);
     const mostRecent = String(current.updatedAt || "") >= String(previous.updatedAt || "") ? current : previous;
 
     const agents = { ...(previous.agents || {}) };
@@ -1053,6 +1086,9 @@ await mkdir(DATA, { recursive: true });
 await migrateLegacyData();
 config = cleanConfig(await loadJson(CONFIG, defaults));
 sessions = await loadJson(SESSIONS, {});
+for (const session of Object.values(sessions)) {
+  if (Array.isArray(session?.messages)) session.messages = mergeMessageLists(session.messages);
+}
 if (!process.env.ANTHROPIC_API_KEY && existsSync(SECRET_FILE)) {
   try { process.env.ANTHROPIC_API_KEY = await loadApiKey(SECRET_FILE, "anthropic"); }
   catch { console.warn("Noctan: protected key unavailable for this Windows user."); }
