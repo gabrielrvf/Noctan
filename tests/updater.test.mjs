@@ -43,6 +43,7 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.match(workflow, /NOCTAN_RELEASE_VERSION/);
   assert.doesNotMatch(workflow, /^  mobile:/m);
   assert.match(workflow, /cancel-in-progress: true/);
+  assert.match(workflow, /NOCTAN_ANDROID_DEBUG_KEYSTORE/);
   assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Publish desktop and Android atomically'));
   assert.match(workflow, /GITHUB_TOKEN/);
 });

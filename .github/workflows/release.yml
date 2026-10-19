@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   release:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip release]') }}
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -45,6 +46,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Restore stable Android signing key
+        shell: pwsh
+        env:
+          NOCTAN_ANDROID_DEBUG_KEYSTORE: ${{ secrets.NOCTAN_ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          New-Item -ItemType Directory -Force "$HOME/.android" | Out-Null
+          [IO.File]::WriteAllBytes("$HOME/.android/debug.keystore", [Convert]::FromBase64String($env:NOCTAN_ANDROID_DEBUG_KEYSTORE))
 
       - name: Build matching Android APK
         shell: pwsh
