@@ -34,6 +34,7 @@ const defaults = {
   anthropicModel: "sonnet",
   openaiModel: "gpt-5.4",
   effort: "medium",
+  bypassAllPermissions: false,
   settingSources: ["user", "project", "local"],
   pluginPaths: [],
   mcpConfigPaths: [],
@@ -111,7 +112,7 @@ async function saveJson(path,obj) {
 }
 
 async function deleteSessionById(id) {
-  if (!id || active.has(id)) throw Error("Não é possível apagar uma conversa em execução.");
+  if (!id || active.has(id)) throw Error("NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel apagar uma conversa em execuÃƒÂ§ÃƒÂ£o.");
   await mkdir(dirname(SESSIONS), { recursive: true });
   const lock = SESSIONS + ".lock";
   let taken = false;
@@ -140,7 +141,7 @@ async function deleteSessionById(id) {
 async function appendSessionNotice(id, text, meta = {}) {
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa não encontrada");
+  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
   const item = { role: "system", text: String(text || "").trim().slice(0, 2000), kind: String(meta.kind || "notice").slice(0, 40), model: meta.model ? String(meta.model).slice(0, 120) : undefined, at: new Date().toISOString() };
   if (!item.text) throw Error("Aviso vazio");
   session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
@@ -151,12 +152,12 @@ async function appendSessionNotice(id, text, meta = {}) {
 }
 
 async function editSessionUserMessage(id, index, text) {
-  if (active.has(id)) throw Error("Pare a execução antes de editar uma mensagem.");
+  if (active.has(id)) throw Error("Pare a execuÃƒÂ§ÃƒÂ£o antes de editar uma mensagem.");
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa não encontrada");
+  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
   const target = session.messages && session.messages[index];
-  if (!target || target.role !== "user") throw Error("Mensagem de usuário não encontrada");
+  if (!target || target.role !== "user") throw Error("Mensagem de usuÃƒÂ¡rio nÃƒÂ£o encontrada");
   const nextText = String(text || "").trim();
   if (!nextText || nextText.length > 40000) throw Error("Mensagem vazia ou muito longa.");
   target.text = nextText; target.editedAt = new Date().toISOString();
@@ -174,7 +175,7 @@ async function saveImageAttachments(items) {
   await mkdir(ATTACHMENTS, { recursive: true });
   for (const item of attachments) {
     const match = String(item?.dataUrl || "").match(/^data:([^;]{1,120});base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw Error("Formato de anexo não permitido.");
+    if (!match) throw Error("Formato de anexo nÃƒÂ£o permitido.");
     const bytes = Buffer.from(match[2], "base64");
     if (bytes.length > 20_000_000) throw Error("Anexo maior que 20 MB.");
     const mime = String(match[1] || "application/octet-stream").toLowerCase();
@@ -197,8 +198,8 @@ async function saveImageAttachments(items) {
 async function pushLiveFollowUp(body) {
   const id = String(body.sessionId || "");
   const running = active.get(id);
-  if (!running) throw Error("Não há execução ativa nesta conversa.");
-  if (running.provider !== "anthropic") throw Error("Follow-up ao vivo está disponível para o Claude.");
+  if (!running) throw Error("NÃƒÂ£o hÃƒÂ¡ execuÃƒÂ§ÃƒÂ£o ativa nesta conversa.");
+  if (running.provider !== "anthropic") throw Error("Follow-up ao vivo estÃƒÂ¡ disponÃƒÂ­vel para o Claude.");
 
   const text = String(body.prompt || "").trim();
   const savedAttachments = await saveImageAttachments(body.attachments);
@@ -207,7 +208,7 @@ async function pushLiveFollowUp(body) {
 
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa não encontrada");
+  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
 
   running.segmentBreakRequested = true;
   const item = {
@@ -224,12 +225,12 @@ async function pushLiveFollowUp(body) {
   await saveJson(SESSIONS, sessions);
 
   const attachmentContext = savedAttachments.length
-    ? "\n\nArquivos anexados pelo usuário agora (use as ferramentas disponíveis para lê-los/inspecioná-los):\n" +
+    ? "\n\nArquivos anexados pelo usuÃƒÂ¡rio agora (use as ferramentas disponÃƒÂ­veis para lÃƒÂª-los/inspecionÃƒÂ¡-los):\n" +
       savedAttachments.map((path) => "- " + path).join("\n")
     : "";
   const userContent = (text || "Analise os arquivos anexados.") + attachmentContext;
   const steeringText =
-    "[Mensagem adicional do usuário durante a execução. Continue todas as tarefas e raciocínios já em andamento; não cancele, substitua nem abandone o trabalho atual, a menos que o usuário peça explicitamente. Incorpore esta informação aos próximos passos e faça tudo junto quando compatível.]\n\n" +
+    "[Mensagem adicional do usuÃƒÂ¡rio durante a execuÃƒÂ§ÃƒÂ£o. Continue todas as tarefas e raciocÃƒÂ­nios jÃƒÂ¡ em andamento; nÃƒÂ£o cancele, substitua nem abandone o trabalho atual, a menos que o usuÃƒÂ¡rio peÃƒÂ§a explicitamente. Incorpore esta informaÃƒÂ§ÃƒÂ£o aos prÃƒÂ³ximos passos e faÃƒÂ§a tudo junto quando compatÃƒÂ­vel.]\n\n" +
     userContent;
 
   const sdkMessage = {
@@ -251,8 +252,8 @@ async function pushLiveFollowUp(body) {
   if (running.res) {
     send(running.res, "notice", {
       text: savedAttachments.length
-        ? "Nova mensagem com imagem recebida durante a execução."
-        : "Nova mensagem recebida durante a execução.",
+        ? "Nova mensagem com imagem recebida durante a execuÃƒÂ§ÃƒÂ£o."
+        : "Nova mensagem recebida durante a execuÃƒÂ§ÃƒÂ£o.",
       kind: "follow-up",
     });
   }
@@ -263,7 +264,7 @@ const readBody = async (req) => {
   let s = "";
   for await (const c of req) {
     s += c;
-    if (s.length > 20_000_000) throw Error("RequisiÃ§Ã£o muito grande");
+    if (s.length > 20_000_000) throw Error("RequisiÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o muito grande");
   }
   return JSON.parse(s || "{}");
 };
@@ -326,6 +327,7 @@ function sessionView(s) {
     openaiResponseId: s.openaiResponseId || null,
     pendingPrompt: s.pendingPrompt || null,
     inFlight: s.inFlight || null,
+    liveActive: active.has(s.id),
   };
 }
 function send(res, type, data) {
@@ -353,7 +355,7 @@ async function getTranscriber() {
 function decodePcm16(base64) {
   const bytes = Buffer.from(base64, "base64");
   if (bytes.length < 2 || bytes.length > 12_000_000)
-    throw Error("Ãudio vazio ou maior que o limite permitido.");
+    throw Error("ÃƒÆ’Ã‚Âudio vazio ou maior que o limite permitido.");
   const samples = new Float32Array(Math.floor(bytes.length / 2));
   for (let index = 0; index < samples.length; index += 1)
     samples[index] = bytes.readInt16LE(index * 2) / 32768;
@@ -384,7 +386,7 @@ async function runAgent(req, res) {
     });
   if (!config.workspace || !existsSync(config.workspace))
     return json(res, 409, {
-      error: "Configure um workspace existente em ConfiguraÃ§Ãµes.",
+      error: "Configure um workspace existente em ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes.",
     });
   const originalPrompt = String(body.prompt || "").trim(),
     attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
@@ -397,7 +399,7 @@ async function runAgent(req, res) {
       const match = String(item?.dataUrl || "").match(
         /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/,
       );
-      if (!match) throw Error("Formato de imagem nÃ£o permitido.");
+      if (!match) throw Error("Formato de imagem nÃƒÆ’Ã‚Â£o permitido.");
       const bytes = Buffer.from(match[2], "base64");
       if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
       const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
@@ -409,7 +411,7 @@ async function runAgent(req, res) {
   const prompt = [
     originalPrompt || "Analise as imagens anexadas.",
     savedAttachments.length
-      ? `\nImagens anexadas pelo usuÃ¡rio (use a ferramenta Read para visualizÃ¡-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
+      ? `\nImagens anexadas pelo usuÃƒÆ’Ã‚Â¡rio (use a ferramenta Read para visualizÃƒÆ’Ã‚Â¡-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
       : "",
   ].join("");
   sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
@@ -418,7 +420,7 @@ async function runAgent(req, res) {
       ? body.sessionId
       : randomUUID();
   if (active.has(id))
-    return json(res, 409, { error: "JÃ¡ existe execuÃ§Ã£o nessa conversa." });
+    return json(res, 409, { error: "JÃƒÆ’Ã‚Â¡ existe execuÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o nessa conversa." });
   const editReplayIndex = Number.isInteger(body.editReplayIndex) ? body.editReplayIndex : null;
   const resumeInterrupted = Boolean(body.resumeInterrupted);
   const s = sessions[id] || {
@@ -435,7 +437,14 @@ async function runAgent(req, res) {
   s.provider = provider;
   delete s.pendingPrompt;
   const replayingEdit = editReplayIndex !== null && s.messages?.[editReplayIndex]?.role === "user";
-  const historyForRebuild = !s.claudeSessionId ? (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])]) : [];
+  const malformedImageSession = (s.messages || []).slice(-30).some((m) =>
+    typeof m?.text === "string" && m.text.includes("an image in the conversation could not be processed")
+  );
+  if (malformedImageSession) delete s.claudeSessionId;
+  const historyForRebuild = !s.claudeSessionId
+    ? (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])])
+        .filter((m) => !(typeof m?.text === "string" && m.text.includes("an image in the conversation could not be processed")))
+    : [];
   if (!replayingEdit && !resumeInterrupted) s.messages.push({
     role: "user",
     text: originalPrompt || "Imagem anexada",
@@ -489,7 +498,7 @@ async function runAgent(req, res) {
       const { runOpenAI } = await import("./openai-provider.mjs");
       const askApproval = async (toolName, input) => {
         if (ctrl.signal.aborted) return false;
-        if (active.get(id)?.autoApproveAll) return true;
+        if (config.bypassAllPermissions || active.get(id)?.autoApproveAll) return true;
         const aid = randomUUID();
         send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
         return await new Promise((resolve) => {
@@ -516,7 +525,7 @@ async function runAgent(req, res) {
         previousResponseId: s.openaiResponseId,
         instructions:
           config.systemInstructions +
-          `\nWorkspace local: ${config.workspace}. Vault: ${config.vault || "nÃ£o configurado"}. Use as ferramentas MCP disponÃ­veis quando necessÃ¡rio. Nunca revele segredos.`,
+          `\nWorkspace local: ${config.workspace}. Vault: ${config.vault || "nÃƒÆ’Ã‚Â£o configurado"}. Use as ferramentas MCP disponÃƒÆ’Ã‚Â­veis quando necessÃƒÆ’Ã‚Â¡rio. Nunca revele segredos.`,
         mcpConfigPaths: config.mcpConfigPaths,
         signal: ctrl.signal,
         approve: askApproval,
@@ -565,15 +574,15 @@ async function runAgent(req, res) {
       opts.mcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
     opts.canUseTool = async (toolName, input) => {
       if (ctrl.signal.aborted)
-        return { behavior: "deny", message: "ExecuÃ§Ã£o cancelada" };
-      if (active.get(id)?.autoApproveAll)
+        return { behavior: "deny", message: "ExecuÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o cancelada" };
+      if (config.bypassAllPermissions || active.get(id)?.autoApproveAll)
         return { behavior: "allow", updatedInput: input };
       const aid = randomUUID();
       send(res, "approval", { id: aid, tool: toolName, input: redact(input) });
       return await new Promise((resolve) => {
         const timer = setTimeout(() => {
           approvals.delete(aid);
-          resolve({ behavior: "deny", message: "AprovaÃ§Ã£o expirou" });
+          resolve({ behavior: "deny", message: "AprovaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o expirou" });
         }, 120000);
         approvals.set(aid, {
           sessionId: id,
@@ -583,21 +592,21 @@ async function runAgent(req, res) {
             resolve(
               allowed
                 ? { behavior: "allow", updatedInput: input }
-                : { behavior: "deny", message: "Negado pelo usuÃ¡rio" },
+                : { behavior: "deny", message: "Negado pelo usuÃƒÆ’Ã‚Â¡rio" },
             );
           },
         });
       });
     };
-    const crashResumePrompt = "A execução anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessão. Não repita ações, comandos, alterações, commits, deploys ou etapas que já tenham sido concluídos. Primeiro confira o contexto e resultados já presentes na sessão; depois continue apenas o que ficou pendente. Preserve todas as instruções e follow-ups do usuário já recebidos.";
+    const crashResumePrompt = "A execuÃƒÂ§ÃƒÂ£o anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessÃƒÂ£o. NÃƒÂ£o repita aÃƒÂ§ÃƒÂµes, comandos, alteraÃƒÂ§ÃƒÂµes, commits, deploys ou etapas que jÃƒÂ¡ tenham sido concluÃƒÂ­dos. Primeiro confira o contexto e resultados jÃƒÂ¡ presentes na sessÃƒÂ£o; depois continue apenas o que ficou pendente. Preserve todas as instruÃƒÂ§ÃƒÂµes e follow-ups do usuÃƒÂ¡rio jÃƒÂ¡ recebidos.";
     let effectivePrompt = resumeInterrupted ? crashResumePrompt : prompt;
     if (historyForRebuild.length) {
       const rebuilt = historyForRebuild
         .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
         .slice(-80)
-        .map((m) => "[" + (m.role === "user" ? "Usuário" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
+        .map((m) => "[" + (m.role === "user" ? "UsuÃƒÂ¡rio" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
         .join("\n\n");
-      effectivePrompt = "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
+      effectivePrompt = "Contexto reconstruÃƒÂ­do da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
     }
     const q = query({ prompt: effectivePrompt, options: opts });
     const runningEntry = active.get(id);
@@ -767,7 +776,7 @@ async function staticFile(res, path) {
     "/style.css": "style.css",
     "/noctan-mark.png": "noctan-mark.png",
   };
-  if (!files[path]) return json(res, 404, { error: "NÃ£o encontrado" });
+  if (!files[path]) return json(res, 404, { error: "NÃƒÆ’Ã‚Â£o encontrado" });
   const file = join(BASE, "public", files[path]);
   const ext = path.endsWith(".js")
     ? "text/javascript"
@@ -833,13 +842,13 @@ if (config.autoStartTunnel && process.env.NOCTAN_TUNNEL_RUNTIME_KEY) {
   try {
     await startTunnel({ controllerPath: config.pcControllerPath, profile: config.tunnelProfile, runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY });
   } catch (error) {
-    console.warn(`Noctan: PC Controller nÃ£o iniciou: ${error.message}`);
+    console.warn(`Noctan: PC Controller nÃƒÆ’Ã‚Â£o iniciou: ${error.message}`);
   }
 }
 try {
   const bootMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
   const bootPcController = bootMcpServers["pc-controller"] || bootMcpServers["pc_controller"] || null;
-  if (bootPcController) connectLocalPcController(bootPcController).catch((error) => console.warn(`Noctan: PC Controller local nÃ£o iniciou: ${error.message}`));
+  if (bootPcController) connectLocalPcController(bootPcController).catch((error) => console.warn(`Noctan: PC Controller local nÃƒÆ’Ã‚Â£o iniciou: ${error.message}`));
 } catch (error) {
   console.warn(`Noctan: falha preparando PC Controller local: ${error.message}`);
 }
@@ -853,7 +862,7 @@ const server = http.createServer(async (req, res) => {
         req.headers.origin,
       )
     )
-      return json(res, 403, { error: "Origem nÃ£o autorizada" });
+      return json(res, 403, { error: "Origem nÃƒÆ’Ã‚Â£o autorizada" });
     if (
       req.method === "GET" &&
       ["/", "/app.js", "/style.css", "/noctan-mark.png"].includes(path)
@@ -880,16 +889,16 @@ const server = http.createServer(async (req, res) => {
       return json(
         res,
         sessions[path.split("/").pop()] ? 200 : 404,
-        sessions[path.split("/").pop()] || { error: "NÃ£o encontrada" },
+        sessions[path.split("/").pop()] || { error: "NÃƒÆ’Ã‚Â£o encontrada" },
       );
 
     if (req.method === "DELETE" && path.startsWith("/api/sessions/")) {
       const id = path.split("/").pop();
       try {
         const deleted = await deleteSessionById(id);
-        return json(res, deleted ? 200 : 404, deleted ? { ok: true, id } : { error: "Conversa não encontrada" });
+        return json(res, deleted ? 200 : 404, deleted ? { ok: true, id } : { error: "Conversa nÃƒÂ£o encontrada" });
       } catch (error) {
-        return json(res, /execução/.test(String(error.message)) ? 409 : 500, { error: String(error.message || error) });
+        return json(res, /execuÃƒÂ§ÃƒÂ£o/.test(String(error.message)) ? 409 : 500, { error: String(error.message || error) });
       }
     }
     if (req.method === "POST" && path === "/api/connect") {
@@ -913,7 +922,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && path === "/api/pc-controller/connect") {
       const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
       const definition = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
-      if (!definition) return json(res, 409, { error: "PC Controller nÃ£o configurado nos MCPs." });
+      if (!definition) return json(res, 409, { error: "PC Controller nÃƒÆ’Ã‚Â£o configurado nos MCPs." });
       return json(res, 200, await connectLocalPcController(definition));
     }
     if (req.method === "POST" && path === "/api/pc-controller/disconnect")
@@ -1023,7 +1032,7 @@ const server = http.createServer(async (req, res) => {
         const result = await editSessionUserMessage(editMatch[1], Number(editMatch[2]), body.text);
         return json(res, 200, { ok: true, index: result.index });
       } catch (error) {
-        return json(res, /execução/.test(String(error.message)) ? 409 : 400, { error: String(error.message || error) });
+        return json(res, /execuÃƒÂ§ÃƒÂ£o/.test(String(error.message)) ? 409 : 400, { error: String(error.message || error) });
       }
     }
     if (req.method === "POST" && path === "/api/run")
@@ -1035,37 +1044,41 @@ const server = http.createServer(async (req, res) => {
         a = approvals.get(b.id);
       if (!a)
         return json(res, 404, {
-          error: "AprovaÃ§Ã£o nÃ£o encontrada ou expirada",
+          error: "AprovaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o nÃƒÆ’Ã‚Â£o encontrada ou expirada",
         });
-      if (b.allowAll === true && b.allow === true) {
+      if (b.bypassAll === true && b.allow === true) {
+        config.bypassAllPermissions = true;
+        await saveJson(CONFIG, config);
+      }
+      if ((b.allowAll === true || b.bypassAll === true) && b.allow === true) {
         const run = active.get(a.sessionId);
         if (run) run.autoApproveAll = true;
       }
       a.decide(b.allow === true);
-      if (b.allowAll === true && b.allow === true) {
+      if ((b.allowAll === true || b.bypassAll === true) && b.allow === true) {
         for (const [approvalId, pending] of approvals) {
           if (approvalId !== b.id && pending.sessionId === a.sessionId) pending.decide(true);
         }
       }
-      return json(res, 200, { ok: true, allowAll: Boolean(b.allowAll && b.allow) });
+      return json(res, 200, { ok: true, allowAll: Boolean(b.allowAll && b.allow), bypassAll: Boolean(b.bypassAll && b.allow) });
     }
     if (req.method === "POST" && path === "/api/cancel") {
       const b = await readBody(req),
         a = active.get(b.sessionId);
-      if (!a) return json(res, 404, { error: "ExecuÃ§Ã£o nÃ£o encontrada" });
+      if (!a) return json(res, 404, { error: "ExecuÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o nÃƒÆ’Ã‚Â£o encontrada" });
       a.ctrl.abort();
       for (const [k, v] of approvals)
         if (v.sessionId === b.sessionId) v.decide(false);
       return json(res, 200, { ok: true });
     }
-    return json(res, 404, { error: "Rota nÃ£o encontrada" });
+    return json(res, 404, { error: "Rota nÃƒÆ’Ã‚Â£o encontrada" });
   } catch (e) {
     if (!res.headersSent) respondError(res, e);
     else res.end();
   }
 });
 server.listen(PORT, HOST, () =>
-  console.log(`Noctan disponÃ­vel em http://${HOST}:${PORT}`),
+  console.log(`Noctan disponÃƒÆ’Ã‚Â­vel em http://${HOST}:${PORT}`),
 );
 const { WebSocketServer } = await import("ws");
 const { Worker } = await import("node:worker_threads");

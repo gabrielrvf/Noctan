@@ -531,10 +531,10 @@ function setRunning(value){
   show($("cancel"),value);
   $("runStatus").textContent=value?"Agente em execu\u00e7\u00e3o":"Aguardando mensagem";
 }
-async function approve(id, allow, allowAll = false) {
+async function approve(id, allow, allowAll = false, bypassAll = false) {
   await request("/api/approve", {
     method: "POST",
-    body: JSON.stringify({ id, allow, allowAll }),
+    body: JSON.stringify({ id, allow, allowAll, bypassAll }),
   });
   show($("pending"), false);
 }
@@ -547,14 +547,15 @@ function approval(a) {
   const pre = document.createElement("pre");
   pre.textContent = JSON.stringify(a.input, null, 2).slice(0, 6000);
   p.append(pre);
-  for (const [name, allow, allowAll] of [
-    ["Permitir", true, false],
-    ["Permitir tudo", true, true],
-    ["Negar", false, false],
+  for (const [name, allow, allowAll, bypassAll] of [
+    ["Permitir", true, false, false],
+    ["Permitir tudo", true, true, false],
+    ["Bypass all permissions", true, true, true],
+    ["Negar", false, false, false],
   ]) {
     const b = document.createElement("button");
     b.textContent = name;
-    b.onclick = () => approve(a.id, allow, allowAll).catch((e) => note(e.message));
+    b.onclick = () => approve(a.id, allow, allowAll, bypassAll).catch((e) => note(e.message));
     p.append(b);
   }
   show(p, true);
