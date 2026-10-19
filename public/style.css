@@ -87,9 +87,18 @@ button:disabled {
   background: #696969;
   box-shadow: none;
 }
-.pcControllerButton i.connecting { background: #d6a93b; }
+.pcControllerButton i img { display: none; width: 16px; height: 16px; object-fit: contain; }
+.pcControllerButton i.connecting {
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  height: 16px;
+  background: transparent;
+}
+.pcControllerButton i.connecting img { display: block; animation: pcControllerSpin 1.1s linear infinite; }
 .pcControllerButton i.connected { background: #4ec985; }
 .pcControllerButton i.error { background: #d65f52; }
+@keyframes pcControllerSpin { to { transform: rotate(360deg); } }
 .sidebar {
   width: 280px;
   background: #0d0d0d;
@@ -859,6 +868,7 @@ h1 {
   color: #8c8c8c;
   margin-left: 3px;
 }
+.appVersion { color: #6f6f6f; font-size: 10px; white-space: nowrap; }
 .usageDot {
   width: 17px;
   height: 17px;

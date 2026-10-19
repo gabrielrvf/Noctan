@@ -292,7 +292,7 @@ function updateTunnelUI() {
   const localState = pc.localState || (pc.localMcpConfigured ? "idle" : "unconfigured");
   const tunnelConnected = tunnelState === "connected";
   const localConnected = Boolean(pc.localConnected);
-  const busy = ["connecting", "stopping"].includes(tunnelState) || ["connecting", "stopping"].includes(localState);
+  const busy = pcReconnectInProgress || ["connecting", "stopping"].includes(tunnelState) || ["connecting", "stopping"].includes(localState);
   const connected = localConnected || tunnelConnected;
   const failed = !busy && !connected;
   $("pcControllerDot").className = busy ? "connecting" : connected ? "connected" : failed ? "error" : "";
@@ -302,6 +302,7 @@ function updateTunnelUI() {
     : busy ? "PC Controller conectando..."
       : (pc.lastError || pc.localLastError || pc.message || pc.localMessage || "PC Controller desconectado - clique para reconectar");
 }
+let pcReconnectInProgress = false;
 async function refreshPcControllerHealth() {
   if (!state.discovery) return;
   try {
@@ -774,18 +775,28 @@ $("newWindow").onclick = () =>
 $("pcControllerBtn").onclick = async () => {
   const button = $("pcControllerBtn");
   const dot = $("pcControllerDot");
+  pcReconnectInProgress = true;
   dot.className = "connecting";
   button.classList.remove("connected");
   button.title = "Reconectando PC Controller...";
   try {
-    await request("/api/tunnel/connect", { method: "POST", body: JSON.stringify({ autoStart: true }) });
     await request("/api/pc-controller/connect", { method: "POST", body: "{}" });
-    await refreshPcControllerHealth();
+    await request("/api/tunnel/connect", { method: "POST", body: JSON.stringify({ autoStart: true }) }).catch(() => null);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await refreshPcControllerHealth();
+      const pc = state.discovery?.pcController || {};
+      if (pc.localConnected || pc.status === "connected") break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const pc = state.discovery?.pcController || {};
+    if (!pc.localConnected && pc.status !== "connected") throw Error(pc.lastError || pc.localLastError || "Não foi possível reconectar o PC Controller.");
   } catch (error) {
     const current = state.discovery?.pcController || {};
     current.status = "error";
     current.localState = "error";
     current.lastError = error.message;
+  } finally {
+    pcReconnectInProgress = false;
     updateTunnelUI();
   }
 };
@@ -1533,6 +1544,7 @@ refresh()
 setTimeout(() => prewarmStt().catch(() => {}), 600);
 
 function renderUpdaterStatus(status = {}) {
+  if ($("appVersion") && status.currentVersion) $("appVersion").textContent = "v" + status.currentVersion;
   const button = $("updateBtn");
   if (!button) return;
   const current = status.status || "idle";

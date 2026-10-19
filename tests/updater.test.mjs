@@ -29,6 +29,8 @@ test('renderer exposes update button and restart-to-update flow', () => {
   assert.match(app, /Reiniciar para atualizar/);
   assert.match(app, /window\.noctanUpdater\.checkNow/);
   assert.match(app, /window\.noctanUpdater\.installNow/);
+  assert.match(html, /id="appVersion"/);
+  assert.match(app, /status\.currentVersion/);
 });
 
 test('main branch publishes incrementing GitHub releases deterministically', () => {
@@ -59,4 +61,11 @@ test('legacy configuration migration preserves workspace and protected keys', ()
 test('PC Controller is green when either local controller or tunnel is connected', () => {
   assert.match(app, /const connected = localConnected \|\| tunnelConnected/);
   assert.match(app, /const failed = !busy && !connected/);
+});
+
+test('PC Controller click shows a spinning Noctan logo until reconnection completes', () => {
+  assert.match(html, /id="pcControllerDot"[^>]*><img src="\/noctan-mark\.png"/);
+  assert.match(app, /pcReconnectInProgress = true/);
+  assert.match(app, /for \(let attempt = 0; attempt < 20/);
+  assert.match(app, /pcReconnectInProgress = false/);
 });
