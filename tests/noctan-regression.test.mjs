@@ -58,6 +58,14 @@ test("Claude slash commands are discovered, persisted and exposed to the clients
 test("Claude sessions start with the user's Chrome extension integration enabled",()=>{
   assert.match(server,/extraArgs:\s*\{\s*chrome:\s*null\s*\}/);
 });
+
+test("Chrome slash commands route to the connected logged-in browser bridge",()=>{
+  assert.match(server,/function normalizeChromeCommand/);
+  assert.match(server,/mcp__plugin_superpowers-chrome_chrome__use_browser/);
+  assert.match(server,/Conectar ao seu Chrome já logado/);
+  assert.match(server,/normalizeChromeCommand\(text/);
+  assert.match(server,/normalizeChromeCommand\(originalPrompt/);
+});
 test("README presents Noctan logo and product name",()=>{
  const docs=read("README.md");
  assert.match(docs,/public\/noctan-mark\.png/);

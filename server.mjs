@@ -81,6 +81,16 @@ async function replaceWithRetry(tmp, path) {
 function isMissingClaudeSessionError(value) {
   return /No conversation found with session ID:/i.test(String(value?.message || value || ""));
 }
+function normalizeChromeCommand(value) {
+  const prompt = String(value || "").trim();
+  if (!/^\/(?:chrome|anthropic-skills:chrome-browser)(?:\s+enable)?\s*$/i.test(prompt)) return prompt;
+  return [
+    "[Comando nativo do Noctan: conectar ao Chrome do usuário]",
+    "Use a integração MCP já conectada do plugin superpowers-chrome, especialmente a ferramenta mcp__plugin_superpowers-chrome_chrome__use_browser.",
+    "Conecte-se ao Chrome existente do usuário, preserve o perfil e login atuais e confirme a conexão listando as abas disponíveis.",
+    "Não abra um navegador separado e não responda que Claude in Chrome está indisponível apenas porque as ferramentas mcp__claude-in-chrome__* não existem.",
+  ].join("\n");
+}
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
@@ -243,7 +253,7 @@ async function pushLiveFollowUp(body) {
     ? "\n\nArquivos anexados pelo usuÃƒÂ¡rio agora (use as ferramentas disponÃƒÂ­veis para lÃƒÂª-los/inspecionÃƒÂ¡-los):\n" +
       savedAttachments.map((path) => "- " + path).join("\n")
     : "";
-  const userContent = (text || "Analise os arquivos anexados.") + attachmentContext;
+  const userContent = normalizeChromeCommand(text || "Analise os arquivos anexados.") + attachmentContext;
   const steeringText =
     "[Mensagem adicional do usuÃƒÂ¡rio durante a execuÃƒÂ§ÃƒÂ£o. Continue todas as tarefas e raciocÃƒÂ­nios jÃƒÂ¡ em andamento; nÃƒÂ£o cancele, substitua nem abandone o trabalho atual, a menos que o usuÃƒÂ¡rio peÃƒÂ§a explicitamente. Incorpore esta informaÃƒÂ§ÃƒÂ£o aos prÃƒÂ³ximos passos e faÃƒÂ§a tudo junto quando compatÃƒÂ­vel.]\n\n" +
     userContent;
@@ -425,7 +435,7 @@ async function runAgent(req, res) {
     }
   }
   const prompt = [
-    originalPrompt || "Analise as imagens anexadas.",
+    normalizeChromeCommand(originalPrompt || "Analise as imagens anexadas."),
     savedAttachments.length
       ? `\nImagens anexadas pelo usuÃƒÆ’Ã‚Â¡rio (use a ferramenta Read para visualizÃƒÆ’Ã‚Â¡-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
       : "",
@@ -637,6 +647,8 @@ async function runAgent(req, res) {
             name: String(command.name || command.command || "").replace(/^\//, ""),
             description: String(command.description || ""),
           })).filter((command) => command.name);
+          if (!s.slashCommands.some((command) => command.name === "chrome"))
+            s.slashCommands.unshift({ name: "chrome", description: "Conectar ao seu Chrome já logado" });
           sessions[id] = s;
           await saveJson(SESSIONS, sessions);
           send(res, "commands", { commands: s.slashCommands });
@@ -696,6 +708,8 @@ async function runAgent(req, res) {
         {
         if (Array.isArray(m.slash_commands)) {
           s.slashCommands = m.slash_commands.map((name) => ({ name: String(name).replace(/^\//, ""), description: "" }));
+          if (!s.slashCommands.some((command) => command.name === "chrome"))
+            s.slashCommands.unshift({ name: "chrome", description: "Conectar ao seu Chrome já logado" });
           sessions[id] = s;
           await saveJson(SESSIONS, sessions);
         }
