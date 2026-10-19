@@ -452,7 +452,7 @@ async function runAgent(req, res) {
       ? body.sessionId
       : randomUUID();
   if (active.has(id))
-    return json(res, 409, { error: "Já existe execução nessa conversa." });
+    return json(res, 409, { error: "J\u00e1 existe execu\u00e7\u00e3o nessa conversa." });
   const editReplayIndex = Number.isInteger(body.editReplayIndex) ? body.editReplayIndex : null;
   const resumeInterrupted = Boolean(body.resumeInterrupted);
   const s = sessions[id] || {

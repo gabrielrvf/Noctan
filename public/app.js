@@ -462,6 +462,7 @@ async function loadSession(id) {
     cost += m.costUsd || 0;
   }
   state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
+  state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
   state.cost = cost;
   updateCost();
   updateSessions();
@@ -554,6 +555,10 @@ function detachRun() {
 function newSession() {
   detachRun();
   state.current = null;
+  state.remoteRunning = false;
+  state.resumeInterrupted = false;
+  state.editReplayIndex = null;
+  state.renderedMessageCount = 0;
   setPromptHistory(null);
   $("prompt").value = "";
   state.cost = 0;

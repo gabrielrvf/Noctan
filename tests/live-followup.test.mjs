@@ -68,3 +68,17 @@ test("background active session streams persisted messages into the open chat", 
   assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
   assert.match(app, /setTimeout\(poll, 1500\)/);
 });
+
+test("new chat is independent from the current conversation session", () => {
+  const block = app.slice(app.indexOf("function newSession()"), app.indexOf("let assistantSegmentEpoch"));
+  assert.match(block, /state\.current = null/);
+  assert.match(block, /state\.remoteRunning = false/);
+  assert.match(block, /state\.resumeInterrupted = false/);
+  assert.match(block, /state\.editReplayIndex = null/);
+  assert.doesNotMatch(block, /claudeSessionId/);
+});
+test("background active session streams persisted messages into the open chat", () => {
+  assert.match(app, /renderedMessageCount/);
+  assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
+  assert.match(app, /setTimeout\(poll, 1500\)/);
+});
