@@ -86,3 +86,10 @@ test("native chrome command is not rewritten to third-party browser MCP", () => 
   assert.doesNotMatch(server, /Use a integra.*superpowers-chrome/);
   assert.match(server, /extraArgs: \{ chrome: null \}/);
 });
+
+test("switching/opening a chat never auto-resumes an inFlight run", () => {
+  const block = app.slice(app.indexOf("async function loadSession"), app.indexOf("function updateCost"));
+  assert.doesNotMatch(block, /await resumeInterruptedRun\(s\)/);
+  assert.match(block, /Execução interrompida — pronta para retomar/);
+  assert.match(block, /syntheticResume/);
+});

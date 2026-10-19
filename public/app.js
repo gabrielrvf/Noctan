@@ -467,7 +467,8 @@ async function loadSession(id) {
   $("chat").replaceChildren();
   let cost = 0;
   for (const [index, m] of s.messages.entries()) {
-    message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, index);
+    const syntheticResume = m.role === "user" && /^Retomar execu(?:ção|..o) interrompida$/i.test(String(m.text || "").trim());
+    if (!syntheticResume) message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, index);
     cost += m.costUsd || 0;
   }
   state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
@@ -504,8 +505,7 @@ async function loadSession(id) {
   state.remoteRunning = false;
   show($("cancel"), false);
   if (s.inFlight && !state.running) {
-    await resumeInterruptedRun(s);
-    return;
+    $("runStatus").textContent = "Execução interrompida — pronta para retomar";
   }
   if (s.pendingPrompt && !state.running) {
     history.replaceState({}, "", "/");
