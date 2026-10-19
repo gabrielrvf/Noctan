@@ -136,7 +136,16 @@ function mergeSessions(stored, incoming) {
     }
     const messages = [...found.values()].sort((a,b) => String(a.at || "").localeCompare(String(b.at || "")));
     const mostRecent = String(current.updatedAt || "") >= String(previous.updatedAt || "") ? current : previous;
-    merged[id] = {...previous,...current,...mostRecent,messages};
+
+    const agents = { ...(previous.agents || {}) };
+    for (const [agentId, incomingAgent] of Object.entries(current.agents || {})) {
+      const existingAgent = agents[agentId];
+      if (!existingAgent) { agents[agentId] = incomingAgent; continue; }
+      const events = [...(existingAgent.events || []), ...(incomingAgent.events || [])];
+      const uniqueEvents = new Map(events.map((event) => [JSON.stringify([event.kind,event.text,event.at]), event]));
+      agents[agentId] = { ...existingAgent, ...incomingAgent, events: [...uniqueEvents.values()].sort((a,b) => String(a.at||"").localeCompare(String(b.at||""))) };
+    }
+    merged[id] = {...previous,...current,...mostRecent,messages,agents};
   }
   return merged;
 }
@@ -359,6 +368,34 @@ function redact(obj) {
     ),
   );
 }
+
+function sessionAgentsView(s) {
+  return Object.values(s.agents || {}).sort((a,b) => String(a.startedAt || "").localeCompare(String(b.startedAt || "")));
+}
+function ensureSessionAgent(s, id, patch = {}) {
+  if (!id) return null;
+  s.agents ||= {};
+  const now = new Date().toISOString();
+  const current = s.agents[id] || { id, status: "running", startedAt: now, events: [] };
+  const next = { ...current, ...patch, id, updatedAt: now };
+  next.events = Array.isArray(current.events) ? current.events : [];
+  s.agents[id] = next;
+  return next;
+}
+function addSessionAgentEvent(agent, kind, text, meta = {}) {
+  if (!agent) return;
+  agent.events ||= [];
+  const value = String(text || "").trim();
+  if (!value && kind !== "status") return;
+  const last = agent.events[agent.events.length - 1];
+  if (last && last.kind === kind && last.text === value) return;
+  agent.events.push({ kind, text: value.slice(0, 12000), at: new Date().toISOString(), ...meta });
+  if (agent.events.length > 250) agent.events.splice(0, agent.events.length - 250);
+}
+function emitAgent(res, agent) {
+  if (!agent) return;
+  send(res, "agent", { agent });
+}
 function sessionView(s) {
   return {
     id: s.id,
@@ -373,6 +410,7 @@ function sessionView(s) {
     inFlight: s.inFlight || null,
     liveActive: active.has(s.id),
     slashCommands: Array.isArray(s.slashCommands) ? s.slashCommands : [],
+    agents: sessionAgentsView(s),
   };
 }
 function send(res, type, data) {
@@ -688,13 +726,76 @@ async function runAgent(req, res) {
           typeof block.content === "string" ? block.content : JSON.stringify(block.content || ""),
         )
       )) terminatedToolSession = true;
+
+      if (m.type === "system" && m.subtype === "task_started" && (m.task_type === "local_agent" || m.subagent_type)) {
+        const agent = ensureSessionAgent(s, m.task_id, {
+          runId: m.run_id || null,
+          description: m.description || "",
+          prompt: m.prompt || "",
+          subagentType: m.subagent_type || "agent",
+          taskType: m.task_type || "local_agent",
+          status: "running",
+          isBackgrounded: Boolean(m.is_backgrounded),
+          spawnDepth: Number(m.spawn_depth || 1),
+          parentTaskId: m.parent_task_id || null,
+          startedAt: new Date().toISOString(),
+        });
+        addSessionAgentEvent(agent, "status", m.description || "Agent iniciado");
+        sessions[id] = s;
+        await saveJson(SESSIONS, sessions);
+        emitAgent(res, agent);
+      } else if (m.type === "system" && m.subtype === "task_progress" && m.task_id) {
+        const agent = ensureSessionAgent(s, m.task_id, {
+          description: m.description || undefined,
+          subagentType: m.subagent_type || undefined,
+          status: "running",
+          summary: m.summary || "",
+          lastToolName: m.last_tool_name || "",
+          usage: m.usage || undefined,
+        });
+        addSessionAgentEvent(agent, "progress", m.summary || m.description || m.last_tool_name || "Em execução");
+        emitAgent(res, agent);
+      } else if (m.type === "system" && m.subtype === "task_updated" && m.task_id) {
+        const patch = m.patch || {};
+        const agent = ensureSessionAgent(s, m.task_id, {
+          ...patch,
+          runId: m.run_id || undefined,
+          endedAt: patch.end_time ? new Date(patch.end_time).toISOString() : undefined,
+        });
+        addSessionAgentEvent(agent, "status", patch.error || patch.status || "Atualizado");
+        sessions[id] = s;
+        await saveJson(SESSIONS, sessions);
+        emitAgent(res, agent);
+      } else if (m.type === "tool_progress" && m.task_id) {
+        const agent = ensureSessionAgent(s, m.task_id, {
+          status: "running",
+          lastToolName: m.tool_name || "",
+          subagentType: m.subagent_type || undefined,
+        });
+        addSessionAgentEvent(agent, "tool", m.tool_name || "Ferramenta", { elapsedSeconds: m.elapsed_time_seconds || 0 });
+        emitAgent(res, agent);
+      }
+      if (m.type === "assistant" && m.agent_id) {
+        const agent = ensureSessionAgent(s, m.agent_id, {
+          subagentType: m.subagent_type || undefined,
+          description: m.task_description || undefined,
+          status: "running",
+        });
+        for (const block of m.message?.content || []) {
+          if (block.type === "text") addSessionAgentEvent(agent, "assistant", block.text);
+          else if (block.type === "tool_use") addSessionAgentEvent(agent, "tool", block.name || "Ferramenta", { input: redact(block.input) });
+        }
+        sessions[id] = s;
+        await saveJson(SESSIONS, sessions);
+        emitAgent(res, agent);
+      }
       if (m.session_id) {
         s.claudeSessionId = m.session_id;
         if (s.inFlight) s.inFlight.lastCheckpointAt = new Date().toISOString();
         sessions[id] = s;
         await saveJson(SESSIONS, sessions);
       }
-      if (m.type === "assistant") {
+      if (m.type === "assistant" && !m.agent_id) {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
             const liveRun = active.get(id);

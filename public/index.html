@@ -40,6 +40,7 @@
           <div>
             <div class="titleRow">
               <h1 id="conversationTitle">Novo chat</h1>
+              <button id="agentsBtn" class="agentsButton" hidden>Agents <span id="agentsCount">0</span></button>
               <button id="newWindow" class="newWindowButton" title="Abrir outra janela">↗ Nova janela</button>
             </div>
             <span id="workspaceLabel"
@@ -54,6 +55,16 @@
             <button id="discoverBtn" class="ghost">↻ Recursos</button>
           </div>
         </header>
+        <aside id="agentsPanel" class="agentsPanel" hidden>
+          <div class="agentsPanelHead">
+            <div><strong>Agents</strong><small>subagents desta conversa</small></div>
+            <button id="closeAgents" class="ghost" aria-label="Fechar">×</button>
+          </div>
+          <div class="agentsBody">
+            <div id="agentsList" class="agentsList"></div>
+            <div id="agentDetail" class="agentDetail"><div class="agentsEmpty">Selecione um agent para ver a conversa.</div></div>
+          </div>
+        </aside>
         <div id="chat" class="chat">
           <div class="welcome">
             <div class="biglogo"><img src="/noctan-mark.png" alt="" /></div>

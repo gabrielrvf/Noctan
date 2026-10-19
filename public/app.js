@@ -9,6 +9,8 @@ let state = {
   renderedMessageCount: 0,
   renderedCounts: new Map(),
   liveRuns: new Map(),
+  agents: [],
+  selectedAgentId: null,
   cost: 0,
   attachments: [],
   provider: "anthropic",
@@ -453,6 +455,75 @@ async function refresh() {
   updateCreditBalance();
   updateConnectState();
 }
+
+function agentStatusLabel(status) {
+  return ({running:"Rodando",pending:"Pendente",completed:"Concluído",failed:"Falhou",killed:"Parado",paused:"Pausado"})[status] || status || "Rodando";
+}
+function setSessionAgents(agents) {
+  state.agents = Array.isArray(agents) ? agents : [];
+  const btn = $("agentsBtn");
+  const count = state.agents.length;
+  $("agentsCount").textContent = String(count);
+  show(btn, count > 0);
+  if (state.selectedAgentId && !state.agents.some((agent) => agent.id === state.selectedAgentId)) state.selectedAgentId = null;
+  renderAgents();
+}
+function upsertSessionAgent(agent) {
+  if (!agent?.id) return;
+  const index = state.agents.findIndex((item) => item.id === agent.id);
+  if (index === -1) state.agents.push(agent);
+  else state.agents[index] = agent;
+  $("agentsCount").textContent = String(state.agents.length);
+  show($("agentsBtn"), state.agents.length > 0);
+  renderAgents();
+}
+function renderAgents() {
+  const list = $("agentsList");
+  if (!list) return;
+  list.replaceChildren();
+  if (!state.agents.length) {
+    const empty=document.createElement("div"); empty.className="agentsEmpty"; empty.textContent="Nenhum subagent nesta conversa."; list.append(empty);
+    return;
+  }
+  for (const agent of state.agents) {
+    const button=document.createElement("button");
+    button.type="button";
+    button.className="agentRow"+(state.selectedAgentId===agent.id?" active":"");
+    const dot=document.createElement("i"); dot.className="agentState "+String(agent.status||"running");
+    const copy=document.createElement("span");
+    const title=document.createElement("strong"); title.textContent=agent.description || agent.subagentType || "Agent";
+    const meta=document.createElement("small"); meta.textContent=agentStatusLabel(agent.status)+(agent.lastToolName?" · "+agent.lastToolName:"");
+    copy.append(title,meta); button.append(dot,copy);
+    button.onclick=()=>{state.selectedAgentId=agent.id; renderAgents(); renderAgentDetail(agent.id);};
+    list.append(button);
+  }
+  if (state.selectedAgentId) renderAgentDetail(state.selectedAgentId);
+}
+function renderAgentDetail(agentId) {
+  const detail=$("agentDetail");
+  const agent=state.agents.find((item)=>item.id===agentId);
+  if (!detail || !agent) return;
+  detail.replaceChildren();
+  const head=document.createElement("div"); head.className="agentDetailHead";
+  const title=document.createElement("h3"); title.textContent=agent.description || "Agent";
+  const badge=document.createElement("span"); badge.className="agentBadge "+String(agent.status||"running"); badge.textContent=agentStatusLabel(agent.status);
+  head.append(title,badge); detail.append(head);
+  if(agent.prompt){
+    const prompt=document.createElement("div"); prompt.className="agentPrompt";
+    const label=document.createElement("small"); label.textContent="Tarefa";
+    const body=document.createElement("div"); body.textContent=agent.prompt;
+    prompt.append(label,body); detail.append(prompt);
+  }
+  const transcript=document.createElement("div"); transcript.className="agentTranscript";
+  for(const event of agent.events || []){
+    const row=document.createElement("div"); row.className="agentEvent "+String(event.kind||"");
+    const meta=document.createElement("small"); meta.textContent=(event.kind==="assistant"?"Agent":event.kind==="tool"?"Ferramenta":"Status")+" · "+new Date(event.at||Date.now()).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+    const body=document.createElement("div"); body.textContent=event.text || "";
+    row.append(meta,body); transcript.append(row);
+  }
+  detail.append(transcript);
+  transcript.scrollTop=transcript.scrollHeight;
+}
 async function loadSession(id) {
   if (state.running && state.current === id) return;
   viewEpoch += 1;
@@ -460,6 +531,7 @@ async function loadSession(id) {
   state.current = id;
   const s = await request("/api/sessions/" + id);
   setSlashCommands(s.slashCommands);
+  setSessionAgents(s.agents);
   state.provider = "anthropic";
   updateProviderUI();
   setPromptHistory(s);
@@ -855,6 +927,10 @@ async function send() {
         } catch {
           continue;
         }
+        if (type === "agent") {
+          if (ownsView()) upsertSessionAgent(data.agent);
+          continue;
+        }
         if (type === "start") {
           const previousStreamSessionId = streamSessionId;
           streamSessionId = data.sessionId;
@@ -1036,6 +1112,14 @@ $("pcControllerBtn").onclick = async () => {
     updateTunnelUI();
   }
 };
+
+$("agentsBtn").onclick = () => {
+  show($("agentsPanel"), true);
+  if (!state.selectedAgentId && state.agents[0]) state.selectedAgentId = state.agents[0].id;
+  renderAgents();
+  if (state.selectedAgentId) renderAgentDetail(state.selectedAgentId);
+};
+$("closeAgents").onclick = () => show($("agentsPanel"), false);
 $("sessionSearch").oninput = updateSessions;
 $("projectBtn").onclick = () => $("discoverBtn").click();
 $("usageBtn").onclick = (event) => {
