@@ -6,7 +6,7 @@ const app=readFileSync(new URL("../public/app.js",import.meta.url),"utf8");
 const html=readFileSync(new URL("../public/index.html",import.meta.url),"utf8");
 
 test("subagent SDK messages are isolated from the main conversation and persisted",()=>{
-  assert.match(server,/m\.type === "assistant" && m\.agent_id/);
+  assert.match(server,/\(m\.type === "assistant" \|\| m\.type === "user"\) && m\.agent_id/);
   assert.match(server,/m\.type === "assistant" && !m\.agent_id/);
   assert.match(server,/m\.subtype === "task_started"/);
   assert.match(server,/m\.subtype === "task_updated"/);

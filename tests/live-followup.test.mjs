@@ -34,7 +34,7 @@ test("editing a user message branches and rebuilds context", () => {
 test("unexpected exit is checkpointed and resumed without duplicating user prompt", () => {
   assert.match(server, /s\.inFlight = \{/);
   assert.match(server, /lastCheckpointAt/);
-  assert.match(server, /if \(!replayingEdit && !resumeInterrupted\) s\.messages\.push/);
+  assert.match(server, /if \(!replayingEdit && !resumeInterrupted && !agentTargetId\) s\.messages\.push/);
   assert.match(server, /opts\.resume = s\.claudeSessionId/);
   assert.match(server, /crashResumePrompt/);
   assert.match(server, /delete s\.inFlight/);

@@ -52,6 +52,13 @@ let config = { ...defaults },
   sessions = {},
   active = new Map(),
   approvals = new Map();
+// Each server process gets its own boot id. A session left with `inFlight`
+// by a previous process (app closed mid-run) is resumed at most once per boot:
+// whoever claims it first (the server's own boot recovery or a UI window) runs
+// the resume, every other client just follows the live run.
+const BOOT_ID = randomUUID();
+const bootRecoveryClaims = new Set();
+const BILLING_ERROR_PATTERN = /credit balance is too low|usage limits/i;
 const json = (res, code, obj) => {
   res.writeHead(code, {
     "content-type": "application/json; charset=utf-8",
@@ -347,6 +354,38 @@ async function pushLiveFollowUp(body) {
   return item;
 }
 
+async function pushAgentFollowUp(sessionId, agentId, prompt) {
+  const running = active.get(sessionId);
+  if (!running) throw Error("Não há execução ativa nesta conversa.");
+  if (running.provider !== "anthropic") throw Error("Conversa com agents está disponível para o Claude.");
+  const text = String(prompt || "").trim();
+  if (!text || text.length > 40000) throw Error("Mensagem vazia ou muito longa.");
+  sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+  const session = sessions[sessionId];
+  const agent = session?.agents?.[agentId];
+  if (!session || !agent) throw Error("Agent não encontrado nesta conversa.");
+  addSessionAgentEvent(agent, "user", text, { source: "user" });
+  session.updatedAt = new Date().toISOString();
+  await saveJson(SESSIONS, sessions);
+  const steeringText = `[Mensagem direta do usuário para o subagent ${agentId} (${agent.description || agent.subagentType || "Agent"}). Use a ferramenta SendMessage para entregar a mensagem abaixo a esse subagent e mantenha a resposta no contexto dele. Não responda no chat principal.]\n\n${text}`;
+  const sdkMessage = {
+    type: "user",
+    message: { role: "user", content: steeringText },
+    parent_tool_use_id: null,
+    priority: "now",
+    origin: { kind: "human" },
+  };
+  if (running.query) {
+    async function* one() { yield sdkMessage; }
+    await running.query.streamInput(one());
+  } else {
+    running.pendingInputs ||= [];
+    running.pendingInputs.push(sdkMessage);
+  }
+  if (running.res) emitAgent(running.res, agent);
+  return agent;
+}
+
 const readBody = async (req) => {
   let s = "";
   for await (const c of req) {
@@ -406,12 +445,125 @@ function redact(obj) {
 function sessionAgentsView(s) {
   return Object.values(s.agents || {}).sort((a,b) => String(a.startedAt || "").localeCompare(String(b.startedAt || "")));
 }
+function textBlocks(content, includeThinking = true) {
+  if (typeof content === "string") return content.trim() ? [{ kind: "message", text: content.trim() }] : [];
+  const result = [];
+  for (const block of Array.isArray(content) ? content : []) {
+    if (block?.type === "text" && String(block.text || "").trim())
+      result.push({ kind: "message", text: String(block.text).trim() });
+    else if (includeThinking && block?.type === "thinking" && String(block.thinking || "").trim())
+      result.push({ kind: "thinking", text: String(block.thinking).trim() });
+  }
+  return result;
+}
+const claudeTranscriptCache = new Map();
+async function claudeTranscriptFor(sessionId) {
+  if (!sessionId || !/^[\w-]+$/.test(String(sessionId))) return null;
+  const cached = claudeTranscriptCache.get(sessionId);
+  if (cached && existsSync(cached.main)) return cached;
+  const root = join(homedir(), ".claude", "projects");
+  const projects = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const project of projects) {
+    if (!project.isDirectory()) continue;
+    const main = join(root, project.name, sessionId + ".jsonl");
+    if (!existsSync(main)) continue;
+    const found = { main, subagents: join(root, project.name, sessionId, "subagents") };
+    claudeTranscriptCache.set(sessionId, found);
+    return found;
+  }
+  return null;
+}
+function parseJsonLines(raw) {
+  const rows = [];
+  for (const line of String(raw || "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try { rows.push(JSON.parse(line)); } catch {}
+  }
+  return rows;
+}
+function agentDefinitionsFromMain(rows) {
+  const toolUses = new Map();
+  const byAgentId = new Map();
+  for (const row of rows) {
+    for (const block of Array.isArray(row?.message?.content) ? row.message.content : []) {
+      if (block?.type === "tool_use" && ["Agent", "Task"].includes(block.name)) {
+        toolUses.set(block.id, {
+          description: String(block.input?.description || "").trim(),
+          prompt: String(block.input?.prompt || "").trim(),
+          subagentType: String(block.input?.subagent_type || "agent").trim(),
+        });
+      }
+      if (block?.type !== "tool_result") continue;
+      const value = typeof block.content === "string" ? block.content : JSON.stringify(block.content || "");
+      const match = value.match(/agentId:\s*([\w-]+)/i);
+      if (match) byAgentId.set(match[1], toolUses.get(block.tool_use_id) || {});
+    }
+  }
+  return byAgentId;
+}
+// Rebuilds subagent conversations from Claude Code's own transcript
+// (~/.claude/projects/<project>/<session>/subagents/agent-*.jsonl) for agents
+// that were not captured live (older Noctan versions, app closed mid-run).
+async function backfillSessionAgents(session) {
+  if (!session?.claudeSessionId) return false;
+  const transcript = await claudeTranscriptFor(session.claudeSessionId);
+  if (!transcript || !existsSync(transcript.subagents)) return false;
+  const mainRows = parseJsonLines(await readFile(transcript.main, "utf8").catch(() => ""));
+  const definitions = agentDefinitionsFromMain(mainRows);
+  const files = await readdir(transcript.subagents, { withFileTypes: true }).catch(() => []);
+  let changed = false;
+  for (const file of files) {
+    if (!file.isFile() || !/^agent-[\w-]+\.jsonl$/i.test(file.name)) continue;
+    const id = file.name.replace(/^agent-/i, "").replace(/\.jsonl$/i, "");
+    if (session.agents?.[id]?.capturedLive) continue;
+    if (session.agents?.[id]?.backfilledFromTranscript && session.agents[id].events?.length) continue;
+    const rows = parseJsonLines(await readFile(join(transcript.subagents, file.name), "utf8").catch(() => ""));
+    const definition = definitions.get(id) || {};
+    const events = [];
+    let prompt = definition.prompt || "";
+    let startedAt = "";
+    let updatedAt = "";
+    let firstUser = true;
+    for (const row of rows) {
+      if (!startedAt && row.timestamp) startedAt = row.timestamp;
+      if (row.timestamp) updatedAt = row.timestamp;
+      const role = row?.message?.role || row?.type;
+      if (!["user", "assistant"].includes(role)) continue;
+      const blocks = textBlocks(row?.message?.content, true);
+      for (const block of blocks) {
+        if (role === "user" && firstUser && !prompt) prompt = block.text;
+        else if (!(role === "user" && firstUser)) events.push({
+          kind: block.kind === "thinking" ? "thinking" : role,
+          text: block.text.slice(0, 12000),
+          at: row.timestamp || new Date().toISOString(),
+        });
+      }
+      if (role === "user" && blocks.length) firstUser = false;
+    }
+    session.agents ||= {};
+    const previous = session.agents[id] || {};
+    session.agents[id] = {
+      id,
+      ...previous,
+      description: previous.description || definition.description || definition.subagentType || "Agent",
+      prompt: previous.prompt || prompt,
+      subagentType: previous.subagentType || definition.subagentType || "agent",
+      status: previous.status || "completed",
+      startedAt: previous.startedAt || startedAt || session.createdAt,
+      updatedAt: previous.updatedAt || updatedAt || session.updatedAt,
+      events: previous.events?.length ? previous.events : events.slice(-250),
+      backfilledFromTranscript: true,
+    };
+    changed = true;
+  }
+  return changed;
+}
 function ensureSessionAgent(s, id, patch = {}) {
   if (!id) return null;
   s.agents ||= {};
   const now = new Date().toISOString();
   const current = s.agents[id] || { id, status: "running", startedAt: now, events: [] };
-  const next = { ...current, ...patch, id, updatedAt: now };
+  const next = { ...current, ...patch, id, updatedAt: now, capturedLive: true };
   next.events = Array.isArray(current.events) ? current.events : [];
   s.agents[id] = next;
   return next;
@@ -445,7 +597,29 @@ function sessionView(s) {
     liveActive: active.has(s.id),
     slashCommands: Array.isArray(s.slashCommands) ? s.slashCommands : [],
     agents: sessionAgentsView(s),
+    bootId: BOOT_ID,
   };
+}
+// A run that died on a billing/credit error must not be auto-resumed on every
+// boot: it would just fail again (and spend nothing but the user's patience).
+function lastRunEndedWithBillingError(session) {
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") return false;
+    if (message?.role === "system") return BILLING_ERROR_PATTERN.test(String(message.text || ""));
+  }
+  return false;
+}
+// Only resume runs that were cut off recently. A run left "in flight" hours ago
+// (old task, user moved on) must not wake up by itself on the next launch.
+const BOOT_RECOVERY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+function inFlightIsRecent(session) {
+  const stamp = Date.parse(session?.inFlight?.lastCheckpointAt || session?.updatedAt || session?.inFlight?.startedAt || "");
+  return Number.isFinite(stamp) && Date.now() - stamp <= BOOT_RECOVERY_MAX_AGE_MS;
+}
+function bootRecoveryEligible(session) {
+  return Boolean(session?.inFlight) && inFlightIsRecent(session) && !active.has(session.id) && !bootRecoveryClaims.has(session.id) && !lastRunEndedWithBillingError(session);
 }
 function send(res, type, data) {
   if (!res.writableEnded)
@@ -540,6 +714,7 @@ async function runAgent(req, res) {
     return json(res, 409, { error: "J\u00e1 existe execu\u00e7\u00e3o nessa conversa." });
   const editReplayIndex = Number.isInteger(body.editReplayIndex) ? body.editReplayIndex : null;
   const resumeInterrupted = Boolean(body.resumeInterrupted);
+  let agentTargetId = typeof body.agentTargetId === "string" ? body.agentTargetId.trim() : "";
   const s = sessions[id] || {
     id,
     title: (originalPrompt || "Imagem anexada").slice(0, 65),
@@ -547,6 +722,8 @@ async function runAgent(req, res) {
     messages: [],
     provider,
   };
+  if (!agentTargetId && resumeInterrupted && s.inFlight?.kind === "agent")
+    agentTargetId = String(s.inFlight.agentId || "");
   if ((s.provider || provider) !== provider && s.messages.length)
     return json(res, 409, {
       error: "Esta conversa pertence a outro provedor. Abra um novo chat para trocar.",
@@ -561,7 +738,13 @@ async function runAgent(req, res) {
   const historyBeforeCurrent = (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])])
     .filter((m) => !(typeof m?.text === "string" && (m.text.includes("an image in the conversation could not be processed") || isMissingClaudeSessionError(m.text))));
   const historyForRebuild = !s.claudeSessionId ? historyBeforeCurrent : [];
-  if (!replayingEdit && !resumeInterrupted) s.messages.push({
+  const targetAgent = agentTargetId ? s.agents?.[agentTargetId] : null;
+  if (agentTargetId && !targetAgent)
+    return json(res, 404, { error: "Agent não encontrado nesta conversa." });
+  if (agentTargetId && provider !== "anthropic")
+    return json(res, 409, { error: "Conversa com agents está disponível para o Claude." });
+  const agentPromptText = resumeInterrupted ? String(s.inFlight?.originalPrompt || originalPrompt) : originalPrompt;
+  if (!replayingEdit && !resumeInterrupted && !agentTargetId) s.messages.push({
     role: "user",
     text: originalPrompt || "Imagem anexada",
     attachments: savedAttachments.map((path) => basename(path)),
@@ -575,7 +758,10 @@ async function runAgent(req, res) {
     lastCheckpointAt: s.updatedAt,
     originalPrompt: resumeInterrupted ? (s.inFlight?.originalPrompt || originalPrompt) : originalPrompt,
     resumeCount: resumeInterrupted ? Number(s.inFlight?.resumeCount || 0) + 1 : 0,
+    kind: agentTargetId ? "agent" : "main",
+    agentId: agentTargetId || null,
   };
+  if (targetAgent && !resumeInterrupted) addSessionAgentEvent(targetAgent, "user", originalPrompt, { source: "user" });
   sessions[id] = s;
   await saveJson(SESSIONS, sessions);
   res.writeHead(200, {
@@ -592,6 +778,7 @@ async function runAgent(req, res) {
     spent = 0,
     assistantRecord = null;
   const persistAssistant = async () => {
+    if (agentTargetId) return;
     const running = active.get(id);
     const segmentStart = Number(running?.segmentStart || 0);
     const text = finalText.slice(segmentStart).trim();
@@ -717,7 +904,10 @@ async function runAgent(req, res) {
     };
     const crashResumePrompt = "A execução anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessão. Não repita ações, comandos, alterações, commits, deploys ou etapas que já tenham sido concluídos. Primeiro confira o contexto e resultados já presentes na sessão; depois continue apenas o que ficou pendente. Preserve todas as instruções e follow-ups do usuário já recebidos.";
     let effectivePrompt = resumeInterrupted ? crashResumePrompt : prompt;
-    if (historyForRebuild.length) {
+    if (agentTargetId) {
+      effectivePrompt = `Resume agent ${agentTargetId} and deliver this user message to that same agent. Keep the reply in the subagent conversation and do not answer in the main chat:\n\n${agentPromptText}`;
+    }
+    if (historyForRebuild.length && !agentTargetId) {
       const rebuilt = historyForRebuild
         .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
         .slice(-80)
@@ -809,15 +999,16 @@ async function runAgent(req, res) {
         addSessionAgentEvent(agent, "tool", m.tool_name || "Ferramenta", { elapsedSeconds: m.elapsed_time_seconds || 0 });
         emitAgent(res, agent);
       }
-      if (m.type === "assistant" && m.agent_id) {
+      if ((m.type === "assistant" || m.type === "user") && m.agent_id) {
         const agent = ensureSessionAgent(s, m.agent_id, {
           subagentType: m.subagent_type || undefined,
           description: m.task_description || undefined,
           status: "running",
         });
         for (const block of m.message?.content || []) {
-          if (block.type === "text") addSessionAgentEvent(agent, "assistant", block.text);
-          else if (block.type === "tool_use") addSessionAgentEvent(agent, "tool", block.name || "Ferramenta", { input: redact(block.input) });
+          if (block.type === "text") addSessionAgentEvent(agent, m.type === "user" ? "user" : "assistant", block.text);
+          else if (block.type === "thinking") addSessionAgentEvent(agent, "thinking", block.thinking || "");
+          else if (block.type === "tool_use" && m.type === "assistant") addSessionAgentEvent(agent, "tool", block.name || "Ferramenta", { input: redact(block.input) });
         }
         sessions[id] = s;
         await saveJson(SESSIONS, sessions);
@@ -829,7 +1020,7 @@ async function runAgent(req, res) {
         sessions[id] = s;
         await saveJson(SESSIONS, sessions);
       }
-      if (m.type === "assistant" && !m.agent_id) {
+      if (m.type === "assistant" && !m.agent_id && !agentTargetId) {
         for (const b of m.message?.content || []) {
           if (b.type === "text") {
             const liveRun = active.get(id);
@@ -885,6 +1076,7 @@ async function runAgent(req, res) {
         continue;
       }
       if (!missingSessionResult) break;
+      if (agentTargetId) throw Error("A sessão original deste agent expirou e não pode mais ser retomada.");
       retriedMissingSession = true;
       delete s.claudeSessionId;
       delete opts.resume;
@@ -899,7 +1091,10 @@ async function runAgent(req, res) {
       send(res, "notice", { text: "A sessão anterior do Claude expirou; o contexto salvo foi restaurado automaticamente." });
     }
     }
-    if (finalText.trim()) {
+    if (agentTargetId) {
+      sessions[id] = s;
+      await saveJson(SESSIONS, sessions);
+    } else if (finalText.trim()) {
       await persistAssistant();
     } else {
       s.messages.push({ role: "assistant", text: "(Sem resposta textual)", costUsd: spent, provider, at: new Date().toISOString() });
@@ -914,12 +1109,17 @@ async function runAgent(req, res) {
   } catch (e) {
     const msg = shortAgentError(e);
     send(res, "error", { error: msg });
-    if(finalText.trim()) await persistAssistant();
-    s.messages.push({
-      role: "system",
-      text: "Erro: " + msg,
-      at: new Date().toISOString(),
-    });
+    if (agentTargetId) {
+      const agent = s.agents?.[agentTargetId];
+      if (agent) addSessionAgentEvent(agent, "assistant", "Não foi possível continuar este agent: " + msg, { isError: true });
+    } else {
+      if(finalText.trim()) await persistAssistant();
+      s.messages.push({
+        role: "system",
+        text: "Erro: " + msg,
+        at: new Date().toISOString(),
+      });
+    }
     delete s.inFlight;
     s.updatedAt = new Date().toISOString();
     sessions[id] = s;
@@ -1089,11 +1289,15 @@ sessions = await loadJson(SESSIONS, {});
 for (const session of Object.values(sessions)) {
   if (Array.isArray(session?.messages)) session.messages = mergeMessageLists(session.messages);
 }
-if (!process.env.ANTHROPIC_API_KEY && existsSync(SECRET_FILE)) {
+// The key saved inside Noctan always wins over an old ANTHROPIC_API_KEY/
+// OPENAI_API_KEY inherited from Windows: otherwise a stale key from another
+// account keeps answering "Credit balance is too low" after the user adds
+// credits to the account whose key is saved in the app.
+if (existsSync(SECRET_FILE)) {
   try { process.env.ANTHROPIC_API_KEY = await loadApiKey(SECRET_FILE, "anthropic"); }
   catch { console.warn("Noctan: protected key unavailable for this Windows user."); }
 }
-if (!process.env.OPENAI_API_KEY && existsSync(OPENAI_SECRET_FILE)) {
+if (existsSync(OPENAI_SECRET_FILE)) {
   try { process.env.OPENAI_API_KEY = await loadApiKey(OPENAI_SECRET_FILE, "openai"); }
   catch { console.warn("Noctan: protected OpenAI key unavailable for this Windows user."); }
 }
@@ -1157,6 +1361,7 @@ const server = http.createServer(async (req, res) => {
         discovery: await discover(),
         config,
         sessionCount: Object.keys(sessions).length,
+        bootId: BOOT_ID,
       });
     if (req.method === "GET" && path.startsWith("/api/sessions")) sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
     if (req.method === "GET" && path === "/api/sessions-summary")
@@ -1169,10 +1374,44 @@ const server = http.createServer(async (req, res) => {
           .map(sessionView)
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       );
-    if (req.method === "GET" && path.startsWith("/api/sessions/")) {
-      const id = path.split("/").pop();
+    const sessionGetMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
+    if (req.method === "GET" && sessionGetMatch) {
+      const session = sessions[sessionGetMatch[1]];
+      if (!session) return json(res, 404, { error: "Conversa não encontrada" });
+      if (await backfillSessionAgents(session).catch(() => false)) {
+        sessions[session.id] = session;
+        await saveJson(SESSIONS, sessions);
+      }
+      return json(res, 200, sessionView(session));
+    }
+
+    const recoveryMatch = path.match(/^\/api\/sessions\/([^/]+)\/claim-boot-recovery$/);
+    if (req.method === "POST" && recoveryMatch) {
+      sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+      const id = recoveryMatch[1];
       const session = sessions[id];
-      return json(res, session ? 200 : 404, session ? sessionView(session) : { error: "Conversa não encontrada" });
+      if (!session) return json(res, 404, { error: "Conversa não encontrada" });
+      const billingBlocked = lastRunEndedWithBillingError(session);
+      const eligible = bootRecoveryEligible(session);
+      if (eligible) bootRecoveryClaims.add(id);
+      return json(res, 200, {
+        bootId: BOOT_ID,
+        claimed: eligible,
+        billingBlocked,
+        liveActive: active.has(id),
+        resumeCount: Number(session.inFlight?.resumeCount || 0),
+      });
+    }
+
+    const agentMessageMatch = path.match(/^\/api\/sessions\/([^/]+)\/agents\/([^/]+)\/messages$/);
+    if (req.method === "POST" && agentMessageMatch) {
+      try {
+        const body = await readBody(req);
+        const agent = await pushAgentFollowUp(decodeURIComponent(agentMessageMatch[1]), decodeURIComponent(agentMessageMatch[2]), body.prompt);
+        return json(res, 202, { ok: true, agent });
+      } catch (error) {
+        return json(res, 409, { error: String(error.message || error) });
+      }
     }
 
     if (req.method === "DELETE" && path.startsWith("/api/sessions/")) {
@@ -1355,9 +1594,44 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
-server.listen(PORT, HOST, () =>
-  console.log(`Noctan disponível em http://${HOST}:${PORT}`),
-);
+// "Toda vez que fecha o Noctan era pra ele voltar de onde parou": runs left
+// `inFlight` by the previous process are resumed once by the server itself,
+// even with no window open. Billing/credit failures are left untouched.
+async function resumeSessionForThisBoot(session) {
+  try {
+    const response = await fetch(`http://${HOST}:${PORT}/api/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: session.id,
+        provider: session.provider || session.inFlight.provider || "anthropic",
+        prompt: "Retomar execução interrompida",
+        resumeInterrupted: true,
+      }),
+    });
+    if (!response.ok) throw Error((await response.text()).slice(0, 1000));
+    const reader = response.body?.getReader();
+    while (reader) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+  } catch (error) {
+    console.error(`Noctan: falha retomando ${session.id}:`, error?.message || error);
+  }
+}
+async function recoverInterruptedSessionsForThisBoot() {
+  const claimed = [];
+  for (const session of Object.values(sessions)) {
+    if (!bootRecoveryEligible(session)) continue;
+    bootRecoveryClaims.add(session.id);
+    claimed.push(session);
+  }
+  await Promise.all(claimed.map(resumeSessionForThisBoot));
+}
+server.listen(PORT, HOST, () => {
+  console.log(`Noctan disponível em http://${HOST}:${PORT}`);
+  setTimeout(() => recoverInterruptedSessionsForThisBoot().catch(() => {}), 350);
+});
 const { WebSocketServer } = await import("ws");
 const { Worker } = await import("node:worker_threads");
 const sttWss = new WebSocketServer({ noServer: true, maxPayload: 65536 });

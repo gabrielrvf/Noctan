@@ -11,6 +11,8 @@ let state = {
   liveRuns: new Map(),
   agents: [],
   selectedAgentId: null,
+  agentSending: new Set(),
+  bootId: null,
   cost: 0,
   attachments: [],
   provider: "anthropic",
@@ -427,6 +429,7 @@ async function refreshPcControllerHealth() {
 }
 async function refresh() {
   const d = await request("/api/status");
+  state.bootId = d.bootId || null;
   state.config = d.config;
   state.provider = d.config.provider === "openai" ? "openai" : "anthropic";
   if (!micServerPreferenceInitialized && d.config.microphoneId && d.config.microphoneId !== "default") {
@@ -512,7 +515,7 @@ function renderAgents() {
     const dot=document.createElement("i"); dot.className="agentState "+String(agent.status||"running");
     const copy=document.createElement("span");
     const title=document.createElement("strong"); title.textContent=agent.description || agent.subagentType || "Agent";
-    const meta=document.createElement("small"); meta.textContent=agentStatusLabel(agent.status)+(agent.lastToolName?" · "+agent.lastToolName:"");
+    const meta=document.createElement("small"); meta.textContent=agentStatusLabel(agent.status)+(agent.subagentType&&agent.subagentType!=="agent"?" · "+agent.subagentType:"");
     copy.append(title,meta); button.append(dot,copy);
     button.onclick=()=>{state.selectedAgentId=agent.id; renderAgents(); renderAgentDetail(agent.id);};
     list.append(button);
@@ -525,7 +528,7 @@ function renderAgentDetail(agentId) {
   if (!detail || !agent) return;
   detail.replaceChildren();
   const head=document.createElement("div"); head.className="agentDetailHead";
-  const title=document.createElement("h3"); title.textContent=agent.description || "Agent";
+  const title=document.createElement("h3"); title.textContent=agent.description || agent.subagentType || "Agent";
   const badge=document.createElement("span"); badge.className="agentBadge "+String(agent.status||"running"); badge.textContent=agentStatusLabel(agent.status);
   head.append(title,badge); detail.append(head);
   if(agent.prompt){
@@ -535,14 +538,72 @@ function renderAgentDetail(agentId) {
     prompt.append(label,body); detail.append(prompt);
   }
   const transcript=document.createElement("div"); transcript.className="agentTranscript";
-  for(const event of agent.events || []){
+  const visibleEvents=(agent.events || []).filter((event)=>{
+    if(!["assistant","user","thinking","message"].includes(event.kind)) return false;
+    const text=String(event.text||"").trim();
+    return text && !/^<(system-reminder|task-notification|local-command|command-name|command-message|command-args)\b/i.test(text);
+  });
+  for(const event of visibleEvents){
     const row=document.createElement("div"); row.className="agentEvent "+String(event.kind||"");
-    const meta=document.createElement("small"); meta.textContent=(event.kind==="assistant"?"Agent":event.kind==="tool"?"Ferramenta":"Status")+" · "+new Date(event.at||Date.now()).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+    const who=event.kind==="assistant"?"Agent":event.kind==="user"?"Você":event.kind==="thinking"?"Pensando":"Mensagem";
+    const meta=document.createElement("small"); meta.textContent=who+" · "+new Date(event.at||Date.now()).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
     const body=document.createElement("div"); body.textContent=event.text || "";
     row.append(meta,body); transcript.append(row);
   }
+  if(!visibleEvents.length){const empty=document.createElement("div");empty.className="agentsEmpty";empty.textContent="Ainda não há mensagens deste agent.";transcript.append(empty);}
   detail.append(transcript);
+  const previousInput=$("agentMessageInput");
+  const draft=previousInput&&previousInput.dataset.agentId===agent.id?previousInput.value:"";
+  const hadFocus=document.activeElement===previousInput;
+  const composer=document.createElement("form"); composer.className="agentComposer";
+  const input=document.createElement("textarea"); input.id="agentMessageInput"; input.dataset.agentId=agent.id; input.rows=2; input.placeholder="Falar com este agent..."; input.maxLength=40000; input.value=draft;
+  const sendButton=document.createElement("button"); sendButton.type="submit"; sendButton.textContent=state.agentSending.has(agent.id)?"Enviando...":"Enviar"; sendButton.disabled=state.agentSending.has(agent.id);
+  composer.append(input,sendButton);
+  input.onkeydown=(event)=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();composer.requestSubmit();}};
+  composer.onsubmit=(event)=>{event.preventDefault();const text=input.value.trim();if(!text||state.agentSending.has(agent.id))return;input.value="";sendAgentMessage(agent.id,text).catch((error)=>note(error.message));};
+  detail.append(composer);
+  if(hadFocus) input.focus();
   transcript.scrollTop=transcript.scrollHeight;
+}
+
+async function sendAgentMessage(agentId, prompt) {
+  if (!state.current || !agentId) return;
+  state.agentSending.add(agentId);
+  renderAgentDetail(agentId);
+  try {
+    if (state.running || state.remoteRunning) {
+      const result = await request(`/api/sessions/${encodeURIComponent(state.current)}/agents/${encodeURIComponent(agentId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      });
+      if (result.agent) upsertSessionAgent(result.agent);
+      return;
+    }
+    const response = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: state.current, provider: "anthropic", prompt, agentTargetId: agentId }),
+    });
+    if (!response.ok) throw Error((await response.json().catch(() => ({}))).error || "Não foi possível falar com o agent.");
+    const reader=response.body.getReader(), decoder=new TextDecoder();
+    let buffer="";
+    while(true){
+      const {done,value}=await reader.read(); if(done)break;
+      buffer+=decoder.decode(value,{stream:true}); let split;
+      while((split=buffer.indexOf("\n\n"))!==-1){
+        const packet=buffer.slice(0,split); buffer=buffer.slice(split+2);
+        const type=packet.match(/^event: (.+)$/m)?.[1]; const line=packet.match(/^data: (.+)$/m)?.[1];
+        if(!line)continue; let data; try{data=JSON.parse(line);}catch{continue;}
+        if(type==="agent"&&data.agent)upsertSessionAgent(data.agent);
+        if(type==="error")throw Error(data.error||"Erro do agent");
+      }
+    }
+    const fresh=await request("/api/sessions/"+encodeURIComponent(state.current));
+    setSessionAgents(fresh.agents);
+  } finally {
+    state.agentSending.delete(agentId);
+    renderAgentDetail(agentId);
+  }
 }
 async function loadSession(id) {
   if (state.running && state.current === id) return;
@@ -580,6 +641,11 @@ async function loadSession(id) {
       const r = await request("/api/sessions/" + id).catch(() => null);
       if (state.current !== id || state.running) return;
       state.remoteRunning = Boolean(r?.liveActive);
+      if (Array.isArray(r?.agents) && document.activeElement?.id !== "agentMessageInput") {
+        const before=JSON.stringify(state.agents.map((agent)=>[agent.id,agent.updatedAt,agent.events?.length]));
+        const after=JSON.stringify(r.agents.map((agent)=>[agent.id,agent.updatedAt,agent.events?.length]));
+        if(before!==after)setSessionAgents(r.agents);
+      }
       show($("cancel"), state.remoteRunning);
       const renderedCount = state.renderedCounts.get(id) ?? state.renderedMessageCount;
       if (r?.messages && r.messages.length > renderedCount) {
@@ -835,6 +901,60 @@ async function resumeInterruptedRun(session) {
   state.resumeInterrupted = true;
   $("runStatus").textContent = "Retomando execução interrompida...";
   await send();
+}
+async function recoverInterruptedSessionAtBoot(session) {
+  const claim = await request(`/api/sessions/${encodeURIComponent(session.id)}/claim-boot-recovery`, {
+    method: "POST",
+    body: "{}",
+  });
+  if (claim.bootId) state.bootId = claim.bootId;
+  if (!claim.claimed) {
+    // The server's own boot recovery (or another window) already resumed it:
+    // just follow the live run instead of starting a second one.
+    if (claim.liveActive && state.current === session.id && !state.running && !state.remoteRunning) await loadSession(session.id);
+    return;
+  }
+  if (state.current === session.id) {
+    state.remoteRunning = true;
+    show($("cancel"), true);
+    $("runStatus").textContent = "Retomando execução interrompida...";
+    beginProgress(session.id);
+    updateProgress("Retomando do último ponto salvo");
+  }
+  const response = await fetch("/api/run", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId: session.id, provider: session.provider || "anthropic", prompt: "Retomar execução interrompida", resumeInterrupted: true }),
+  });
+  if (!response.ok) throw Error((await response.json().catch(() => ({}))).error || "Falha ao retomar conversa interrompida.");
+  const reader=response.body.getReader(), decoder=new TextDecoder();
+  let buffer="", recoveryAssistant=null;
+  while(true){
+    const {done,value}=await reader.read(); if(done)break;
+    buffer+=decoder.decode(value,{stream:true}); let split;
+    while((split=buffer.indexOf("\n\n"))!==-1){
+      const packet=buffer.slice(0,split); buffer=buffer.slice(split+2);
+      const type=packet.match(/^event: (.+)$/m)?.[1]; const line=packet.match(/^data: (.+)$/m)?.[1];
+      if(!line)continue; let data; try{data=JSON.parse(line);}catch{continue;}
+      if(type==="agent"&&data.agent&&state.current===session.id)upsertSessionAgent(data.agent);
+      if(type==="text"&&state.current===session.id){
+        updateProgress("Continuando a execução");
+        if(!recoveryAssistant||!recoveryAssistant.isConnected) recoveryAssistant=message("assistant","");
+        recoveryAssistant.rawText=(recoveryAssistant.rawText||"")+(recoveryAssistant.rawText?"\n":"")+String(data.text||"");
+        renderMarkdown(recoveryAssistant,recoveryAssistant.rawText);
+        keepProgressLast();
+      }
+      if(type==="error")throw Error(data.error||"Falha ao retomar conversa interrompida.");
+    }
+  }
+  await refresh();
+  if (state.current === session.id) { endProgress(); state.remoteRunning = false; await loadSession(session.id); }
+}
+function recoverInterruptedSessionsAtBoot() {
+  const interrupted=state.sessions.filter((session)=>session.inFlight&&!session.liveActive);
+  for(const session of interrupted) recoverInterruptedSessionAtBoot(session).catch((error)=>{
+    if(state.current===session.id){state.remoteRunning=false;show($("cancel"),false);note(error.message);}
+  });
 }
 async function send() {
   await stopDictationForSend();
@@ -1139,12 +1259,70 @@ $("pcControllerBtn").onclick = async () => {
 };
 
 $("agentsBtn").onclick = () => {
+  const main = document.querySelector("main");
+  main?.classList.add("agentsOpen");
+  if (main) {
+    const currentWidth = Number.parseFloat(getComputedStyle(main).getPropertyValue("--agents-width")) || 720;
+    const fittedWidth = Math.max(360, Math.min(currentWidth, main.getBoundingClientRect().width - 360));
+    main.style.setProperty("--agents-width", `${fittedWidth}px`);
+  }
   show($("agentsPanel"), true);
   if (!state.selectedAgentId && state.agents[0]) state.selectedAgentId = state.agents[0].id;
   renderAgents();
   if (state.selectedAgentId) renderAgentDetail(state.selectedAgentId);
 };
-$("closeAgents").onclick = () => show($("agentsPanel"), false);
+$("closeAgents").onclick = () => {
+  show($("agentsPanel"), false);
+  document.querySelector("main")?.classList.remove("agentsOpen");
+};
+
+function installHorizontalResize(handle, onMove, onEnd) {
+  if (!handle) return;
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.classList.add("dragging");
+    handle.setPointerCapture?.(event.pointerId);
+    const move = (moveEvent) => onMove(moveEvent.clientX);
+    const end = () => {
+      handle.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      onEnd?.();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  });
+}
+function readStoredWidth(key) {
+  try { return Number(localStorage.getItem(key)); } catch { return 0; }
+}
+function storeWidth(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch {}
+}
+
+const mainLayout = document.querySelector("main");
+const savedAgentsWidth = readStoredWidth("noctanAgentsWidth");
+if (savedAgentsWidth >= 360) mainLayout?.style.setProperty("--agents-width", `${savedAgentsWidth}px`);
+installHorizontalResize($("agentsResize"), (clientX) => {
+  const bounds = mainLayout.getBoundingClientRect();
+  const width = Math.max(360, Math.min(bounds.width - 360, bounds.right - clientX));
+  mainLayout.style.setProperty("--agents-width", `${width}px`);
+}, () => {
+  storeWidth("noctanAgentsWidth", Math.round($("agentsPanel").getBoundingClientRect().width));
+});
+
+const agentsBody = document.querySelector(".agentsBody");
+const savedListWidth = readStoredWidth("noctanAgentListWidth");
+if (savedListWidth >= 160) agentsBody?.style.setProperty("--agent-list-width", `${savedListWidth}px`);
+installHorizontalResize($("agentListResize"), (clientX) => {
+  const bounds = agentsBody.getBoundingClientRect();
+  const width = Math.max(160, Math.min(bounds.width - 260, clientX - bounds.left));
+  agentsBody.style.setProperty("--agent-list-width", `${width}px`);
+}, () => {
+  storeWidth("noctanAgentListWidth", Math.round($("agentsList").getBoundingClientRect().width));
+});
 $("sessionSearch").oninput = updateSessions;
 $("projectBtn").onclick = () => $("discoverBtn").click();
 $("usageBtn").onclick = (event) => {
@@ -1913,6 +2091,7 @@ refresh()
       ? requested
       : interrupted?.id || latest?.id;
     if (selected) await loadSession(selected);
+    recoverInterruptedSessionsAtBoot();
   })
   .catch((e) => message("system", e.message));
 

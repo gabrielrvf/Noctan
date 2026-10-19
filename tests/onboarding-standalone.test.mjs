@@ -16,7 +16,12 @@ test("desktop onboarding exposes the OpenAI inference key separately from the op
 
 test("agents drawer stays below the native Windows title bar", () => {
   const css = read("public/style.css");
-  assert.match(css, /\.agentsPanel\{[^}]*top:32px/);
+  // The panel is now a resizable column of <main>, which already sits below
+  // the 32px drag bar (.layout margin-top), instead of a fixed overlay.
+  assert.match(css, /\.layout \{\s*margin-top: 32px;/);
+  assert.match(css, /main\.agentsOpen\{[^}]*display:grid/);
+  assert.match(css, /\.agentsPanel\{[^}]*grid-row:1\/4/);
+  assert.doesNotMatch(css, /\.agentsPanel\{[^}]*position:fixed/);
 });
 
 test("Android follows the provider configured on the desktop", () => {

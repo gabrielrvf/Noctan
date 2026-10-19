@@ -13,5 +13,6 @@ test("mobile sends live messages as follow-ups and falls back on run races",()=>
 });
 
 test("individual session endpoint includes computed liveActive",()=>{
-  assert.match(server,/session \? sessionView\(session\)/);
+  assert.match(server,/liveActive: active\.has\(s\.id\)/);
+  assert.match(server,/sessionGetMatch[\s\S]{0,400}return json\(res, 200, sessionView\(session\)\)/);
 });
