@@ -687,6 +687,14 @@ async function send() {
   const resumeInterrupted = Boolean(state.resumeInterrupted);
   const prompt = resumeInterrupted ? "Retomar execução interrompida" : $("prompt").value.trim();
   if (!resumeInterrupted && !prompt && !state.attachments.length) return;
+  if (state.current && !state.running && !resumeInterrupted) {
+    const live = await request("/api/sessions/" + state.current).catch(() => null);
+    state.remoteRunning = Boolean(live?.liveActive);
+    if (state.remoteRunning) {
+      show($("cancel"), true);
+      $("runStatus").textContent = "Executando em segundo plano...";
+    }
+  }
   if ((state.running || state.remoteRunning) && state.current) {
     const attachments = [...state.attachments];
     if (!prompt && !attachments.length) return;
@@ -746,6 +754,18 @@ async function send() {
     state.resumeInterrupted = false;
     if (!response.ok) {
       const j = await response.json();
+      if (response.status === 409 && state.current && /existe execu/i.test(String(j.error || ""))) {
+        await request("/api/follow-up", {
+          method: "POST",
+          body: JSON.stringify({ sessionId: state.current, prompt, attachments }),
+        });
+        state.remoteRunning = true;
+        setRunning(false);
+        show($("cancel"), true);
+        $("runStatus").textContent = "Executando em segundo plano...";
+        endProgress();
+        return;
+      }
       throw Error(j.error || "Erro");
     }
     const reader = response.body.getReader(),

@@ -82,3 +82,10 @@ test("background active session streams persisted messages into the open chat", 
   assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
   assert.match(app, /setTimeout\(poll, 1500\)/);
 });
+
+test("send preflights liveActive and converts run races into follow-up", () => {
+  assert.match(app, /request\("\/api\/sessions\/" \+ state\.current\)/);
+  assert.match(app, /state\.remoteRunning = Boolean\(live\?\.liveActive\)/);
+  assert.match(app, /response\.status === 409/);
+  assert.match(app, /request\("\/api\/follow-up"/);
+});
