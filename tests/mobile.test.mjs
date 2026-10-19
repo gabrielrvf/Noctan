@@ -36,3 +36,13 @@ test('mobile client supports live chat, attachments, voice, approvals and stop',
   assert.match(html, /Permitir tudo/);
   assert.match(html, /previewDialog/);
 });
+
+test('mobile can pull to refresh and recover a changed PC connection', () => {
+  assert.match(html, /id="pullRefresh"/);
+  assert.match(html, /touchstart/);
+  assert.match(html, /touchmove/);
+  assert.match(html, /touchend/);
+  assert.match(html, /tryDefaultConnection/);
+  assert.match(html, /PC não encontrado/);
+  assert.doesNotMatch(html, /endereÃ/);
+});
