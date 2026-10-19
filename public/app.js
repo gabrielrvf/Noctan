@@ -367,14 +367,21 @@ function totalLocalSpend() {
   );
 }
 function updateCreditBalance() {
-  $("creditBalance").textContent = "Ver na Anthropic";
+  $("creditBalance").textContent = state.provider === "openai" ? "Ver na OpenAI" : "Ver na Anthropic";
 }
 function providerModel() {
-  return state.config.anthropicModel || state.config.model || "sonnet";
+  return state.provider === "openai"
+    ? state.config.openaiModel || "gpt-5.4"
+    : state.config.anthropicModel || state.config.model || "sonnet";
 }
 function updateProviderUI() {
   $("modelBtnLabel").textContent = modelLabel(providerModel());
-  $("sidebarCredits").title = "Abrir cr\u00e9ditos oficiais da Anthropic";
+  $("sidebarCredits").title = state.provider === "openai"
+    ? "Abrir uso oficial da OpenAI"
+    : "Abrir cr\u00e9ditos oficiais da Anthropic";
+  document.querySelectorAll("[data-provider][data-model]").forEach((button) => {
+    button.hidden = button.dataset.provider !== state.provider;
+  });
 }
 function updateTunnelUI() {
   const pc = state.discovery?.pcController || {};
@@ -421,6 +428,7 @@ async function refreshPcControllerHealth() {
 async function refresh() {
   const d = await request("/api/status");
   state.config = d.config;
+  state.provider = d.config.provider === "openai" ? "openai" : "anthropic";
   if (!micServerPreferenceInitialized && d.config.microphoneId && d.config.microphoneId !== "default") {
     selectedMicId = d.config.microphoneId;
     selectedMicLabel = d.config.microphoneLabel || "";
@@ -435,7 +443,7 @@ async function refresh() {
     const currentSession = state.sessions.find(s => s.id === state.current);
     if (currentSession && promptHistoryIndex < 0) sentPrompts = sessionPrompts(currentSession);
   }
-  const selectedConnected = Boolean(d.discovery.providerKeys?.anthropic);
+  const selectedConnected = Boolean(d.discovery.providerKeys?.[state.provider]);
   $("connection").textContent = selectedConnected
     ? "\u2713 Tudo conectado"
     : "\u2022 Conex\u00e3o pendente";
@@ -544,7 +552,7 @@ async function loadSession(id) {
   const s = await request("/api/sessions/" + id);
   setSlashCommands(s.slashCommands);
   setSessionAgents(s.agents);
-  state.provider = "anthropic";
+  state.provider = state.config.provider === "openai" ? "openai" : "anthropic";
   updateProviderUI();
   setPromptHistory(s);
   $("prompt").value = "";
@@ -1063,8 +1071,11 @@ function displayDiscovery() {
 function updateConnectState() {
   const d = state.discovery || {};
   const anthropicConnected = Boolean(d.providerKeys?.anthropic);
+  const openaiConnected = Boolean(d.providerKeys?.openai);
   $("apiState").textContent = anthropicConnected ? "Conectada" : "Pendente";
   $("apiState").className = anthropicConnected ? "ok" : "warn";
+  $("openaiApiState").textContent = openaiConnected ? "Conectada" : "Pendente";
+  $("openaiApiState").className = openaiConnected ? "ok" : "warn";
   const tunnel = d.pcController || {};
   const pcLocalConnected = Boolean(tunnel.localConnected);
   const pcLocalState = tunnel.localState || (tunnel.localMcpConfigured ? "idle" : "unconfigured");
@@ -1086,12 +1097,14 @@ function updateConnectState() {
 }
 function openConnect() {
   updateConnectState();
+  $("defaultProvider").value = state.config.provider === "openai" ? "openai" : "anthropic";
+  $("openaiApiKey").value = "";
   $("anthropicApiKey").value = "";
   $("tunnelRuntimeKey").value = "";
   $("connectError").textContent = "";
   show($("connectError"), false);
   show($("connectModal"), true);
-  $("anthropicApiKey").focus();
+  $(state.config.provider === "openai" ? "openaiApiKey" : "anthropicApiKey").focus();
 }
 $("connectBtn").onclick = openConnect;
 $("newWindow").onclick = () =>
@@ -1153,10 +1166,14 @@ document.querySelectorAll("[data-model]").forEach((button) => {
   button.onclick = async () => {
     const previous = providerModel();
     const nextModel = button.dataset.model;
-    if (previous === nextModel) { show($("modelPopover"), false); return; }
+    const nextProvider = button.dataset.provider || state.provider;
+    if (previous === nextModel && state.provider === nextProvider) { show($("modelPopover"), false); return; }
+    const modelPatch = nextProvider === "openai"
+      ? { openaiModel: nextModel }
+      : { anthropicModel: nextModel, model: nextModel };
     await request("/api/config", {
       method: "PUT",
-      body: JSON.stringify({ ...state.config, anthropicModel: nextModel, model: nextModel }),
+      body: JSON.stringify({ ...state.config, provider: nextProvider, ...modelPatch }),
     });
     const noticeText = "Modelo alterado para " + modelLabel(nextModel) + (state.running ? " — passa a valer no próximo turno." : ".");
     if (state.current) {
@@ -1202,7 +1219,11 @@ $("closeConnect").onclick = () => show($("connectModal"), false);
 $("sidebarCredits").onclick = (event) => {
   event.stopPropagation();
   show($("usagePopover"), false);
-  window.open("https://platform.claude.com/settings/billing", "_blank", "noopener,noreferrer");
+  window.open(
+    state.provider === "openai" ? "https://platform.openai.com/usage" : "https://platform.claude.com/settings/billing",
+    "_blank",
+    "noopener,noreferrer",
+  );
 };
 
 $("closeOfficialCredits").onclick = () => show($("officialCreditsModal"), false);
@@ -1218,6 +1239,8 @@ $("openAdvanced").onclick = () => {
   $("settingsBtn").click();
 };
 $("connectAll").onclick = async () => {
+  const provider = $("defaultProvider").value === "openai" ? "openai" : "anthropic";
+  const openaiKey = $("openaiApiKey").value.trim();
   const anthropicKey = $("anthropicApiKey").value.trim();
   const runtimeKey = $("tunnelRuntimeKey").value.trim();
   const button = $("connectAll");
@@ -1227,12 +1250,19 @@ $("connectAll").onclick = async () => {
   try {
     if (
       !anthropicKey &&
+      !openaiKey &&
       !runtimeKey &&
       !state.discovery.providerKeys?.anthropic &&
+      !state.discovery.providerKeys?.openai &&
       !state.discovery.pcController?.localMcpConfigured &&
       !state.discovery.pcController?.runtimeKeyConfigured
     )
-      throw Error("Conecte a Anthropic ou configure o PC Controller local.");
+      throw Error("Informe uma chave OpenAI ou Anthropic, ou configure o PC Controller local.");
+    if (openaiKey)
+      await request("/api/connect", {
+        method: "POST",
+        body: JSON.stringify({ key: openaiKey, provider: "openai" }),
+      });
     if (anthropicKey)
       await request("/api/connect", {
         method: "POST",
@@ -1247,6 +1277,11 @@ $("connectAll").onclick = async () => {
         }),
       });
     await request("/api/autoconfigure", { method: "POST", body: "{}" });
+    await request("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ ...state.config, provider }),
+    });
+    $("openaiApiKey").value = "";
     $("anthropicApiKey").value = "";
     $("tunnelRuntimeKey").value = "";
     await refresh();

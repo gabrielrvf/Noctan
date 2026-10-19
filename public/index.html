@@ -135,17 +135,23 @@
           </div>
           <section id="modelPopover" class="compactPopover modelPopover" hidden>
                 <small>Modelo &middot; esta sess&atilde;o</small>
-            <button class="choice anthropicModel" data-model="opus">
+            <button class="choice anthropicModel" data-provider="anthropic" data-model="opus">
               <span>Opus 5.5</span><b class="check">✓</b>
             </button>
-            <button class="choice anthropicModel" data-model="fable">
+            <button class="choice anthropicModel" data-provider="anthropic" data-model="fable">
               <span>Fable 5.1</span><b class="check">✓</b>
             </button>
-            <button class="choice anthropicModel" data-model="sonnet">
+            <button class="choice anthropicModel" data-provider="anthropic" data-model="sonnet">
               <span>Sonnet 5.5</span><b class="check">✓</b>
             </button>
-            <button class="choice anthropicModel" data-model="haiku">
+            <button class="choice anthropicModel" data-provider="anthropic" data-model="haiku">
               <span>Haiku 5.5</span><b class="check">✓</b>
+            </button>
+            <button class="choice openaiModel" data-provider="openai" data-model="gpt-5.4">
+              <span>GPT-5.4</span><b class="check">✓</b>
+            </button>
+            <button class="choice openaiModel" data-provider="openai" data-model="gpt-5.4-mini">
+              <span>GPT-5.4 mini</span><b class="check">✓</b>
             </button>
             <div class="separator"></div>
             <small>Esforço</small>
@@ -239,12 +245,15 @@
           <button id="closeConnect" class="ghost">✕</button>
         </div>
         <p class="hint">
-          Uma vez conectado, o Noctan usa suas configurações locais da API Claude
-          para trabalhar em qualquer projeto.
+          Escolha OpenAI ou Anthropic. As chaves ficam protegidas localmente pela
+          criptografia do Windows.
         </p>
         <div class="integrationGrid">
           <div class="integration">
             <span>Claude API</span><strong id="apiState">Pendente</strong>
+          </div>
+          <div class="integration">
+            <span>OpenAI API</span><strong id="openaiApiState">Pendente</strong>
           </div>
           <div class="integration">
             <span>PC Controller</span><strong id="tunnelState">Pendente</strong>
@@ -262,6 +271,18 @@
             ><strong id="pluginState">Detectados</strong>
           </div>
         </div>
+        <label>Provedor principal<select id="defaultProvider">
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+        </select></label>
+        <label
+          >Chave da OpenAI API<input
+            id="openaiApiKey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="sk-••••••••••••••••"
+        /></label>
         <label
           >Chave da Anthropic API<input
             id="anthropicApiKey"
@@ -271,7 +292,7 @@
             placeholder="sk-ant-••••••••••••••••"
         /></label>
         <label
-          >Runtime API Key da OpenAI para o Secure Tunnel<input
+          >Runtime API Key do Secure Tunnel (opcional; integração externa com ChatGPT)<input
             id="tunnelRuntimeKey"
             type="password"
             autocomplete="off"

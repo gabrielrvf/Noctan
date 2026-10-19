@@ -5,89 +5,151 @@
 <h1 align="center">Noctan</h1>
 
 <p align="center">
-  <strong>Seu workspace de IA local para continuar projetos, executar tarefas e preservar contexto.</strong>
+  <strong>Workspace de IA local para Windows, com PC Controller integrado e aplicativo Android.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/yanoliveira16/noctan">Repositório</a> · Windows · Electron · Claude Agent SDK
+  <a href="https://github.com/yanoliveira16/noctan/releases/latest">Baixar a versão mais recente</a> ·
+  <a href="https://github.com/yanoliveira16/noctan">Código-fonte</a>
 </p>
 
----
+## O que é
 
-## O que é o Noctan?
+O Noctan é um aplicativo desktop independente que reúne chat com IA, histórico local, workspaces, arquivos, comandos, agentes e automação do computador em uma única interface.
 
-O **Noctan** é um cliente desktop independente para trabalhar com o Claude através da **API da Anthropic**. Ele reúne conversas, acesso autorizado a arquivos do computador, workspaces, `CLAUDE.md`, MCPs, plugins e arquivos de memória em uma interface própria.
+O instalador já inclui o **PC Controller**. O usuário final não precisa instalar separadamente o repositório `mcp-chatgpt`, Node.js, Claude Code ou arquivos MCP para usar as ferramentas locais incluídas. Atualmente o PC Controller integrado expõe cerca de 80 ferramentas; a quantidade pode variar entre versões.
 
-Não é um produto oficial da Anthropic. O Noctan foi criado para aproveitar os créditos mensais de API incluídos nos planos elegíveis do Claude: atualmente, **Max 5x inclui US$ 100 por ciclo e Max 20x inclui US$ 200 por ciclo**, depois que o usuário vincula sua organização do Claude Console. Pro e Free não recebem esse benefício. Também é possível usar créditos de API comprados separadamente. Valores e elegibilidade podem mudar; confira sempre a documentação oficial da Anthropic.
+O chat pode usar:
 
-## Recursos
+- **OpenAI**, através de uma chave da OpenAI API e da Responses API.
+- **Anthropic**, através de uma chave da Anthropic API e do Claude Agent SDK.
 
-- Conversas com histórico persistente por sessão e recuperação de contexto do projeto.
-- Claude Agent SDK com execução de ferramentas, aprovação quando necessária e botão **Parar**.
-- Painel de execução temporário na conversa, com espiral animado, frases de espera e eventos reais expansíveis; somente mensagens e respostas permanecem no histórico.
-- Envio com **Enter**, nova linha com **Shift+Enter** e imagens anexadas.
-- Transcrição de voz local e progressiva com **sherpa-onnx / Nemotron**; microfone selecionado salvo entre sessões.
-- Integração com ferramentas e MCPs disponíveis na máquina.
-- Consulta a Vault, diretórios adicionais e instruções autorizadas.
-- Indicador de consumo local estimado em dólares, **sem limite de turnos ou orçamento por tarefa imposto pelo Noctan**. O provedor ainda pode aplicar limites próprios.
-- API Key protegida por criptografia associada ao usuário do Windows; nunca é enviada ao repositório ou ao Vault.
-- Gerenciador visual do **PC Controller / OpenAI Secure MCP Tunnel**, sem deixar uma janela do PowerShell aberta.
-- Inicialização automática do PC Controller quando uma Runtime API Key já estiver configurada.
+O Noctan não é um produto oficial da OpenAI nem da Anthropic.
 
-## Começar no Windows
+## Instalação rápida no Windows
 
-Requisitos para o chat: Windows, Node.js 20 ou superior, uma API Key válida da Anthropic e saldo disponível na organização do Claude Console. Para receber o benefício mensal, vincule uma organização elegível ao Claude Max ou Team em **Claude → Configurações → Cobrança → Créditos de API**.
+1. Abra a página de [Releases](https://github.com/yanoliveira16/Noctan/releases/latest).
+2. Baixe `Noctan-Setup-<versão>.exe` e conclua a instalação.
+3. Abra o Noctan e clique em **Conectar tudo**.
+4. Escolha **OpenAI (GPT)** ou **Anthropic (Claude)** como provedor principal.
+5. Cole a chave do provedor escolhido.
+6. Em **Personalização**, selecione uma pasta existente como workspace.
+7. Envie uma mensagem. O PC Controller local inicia com o Noctan e fica disponível para o provedor escolhido.
+
+O instalador preserva configurações e conversas armazenadas em `%APPDATA%\Noctan\data`. Atualizar o aplicativo não deve apagar essa pasta.
+
+## Onde obter as chaves
+
+### OpenAI
+
+Crie uma chave padrão de projeto em:
+
+https://platform.openai.com/api-keys
+
+Essa é a chave usada pelo chat GPT dentro do Noctan. Uso da API é separado de uma assinatura do ChatGPT e depende do faturamento e dos limites configurados na OpenAI Platform.
+
+### Anthropic
+
+Crie ou gerencie uma chave em:
+
+https://console.anthropic.com/settings/keys
+
+Essa chave é usada pelo chat Claude dentro do Noctan. Consulte diretamente a Anthropic para preços, créditos e elegibilidade atuais.
+
+### Runtime API Key do Secure Tunnel
+
+A **Runtime API Key do Secure Tunnel** é opcional e diferente da chave OpenAI usada pelo GPT. Ela só é necessária para conectar o PC Controller a uma sessão externa compatível do ChatGPT. Para usar o Noctan como aplicativo standalone no próprio PC, a Runtime Key não é obrigatória.
+
+As chaves salvas pelo Noctan ficam em arquivos protegidos pela criptografia vinculada ao usuário do Windows. Nunca publique chaves no GitHub, no README, no Vault ou em conversas compartilhadas.
+
+## PC Controller integrado
+
+No Desktop, o botão **PC Controller** mostra o estado do controlador local:
+
+- girando: conectando ou tentando recuperar a conexão;
+- verde: controlador local disponível;
+- vermelho: desconectado ou com erro; clique para tentar reconectar.
+
+O pacote do controlador é fixado no `package-lock.json` para que uma instalação reproduzível leve junto as ferramentas compatíveis. Configurações MCP adicionais continuam opcionais.
+
+## Android
+
+Cada Release publica o Desktop e o APK com a mesma versão. Baixe `Noctan-Mobile-<versão>.apk` na mesma página de [Releases](https://github.com/yanoliveira16/Noctan/releases/latest).
+
+O APK é um controle remoto do Noctan Desktop: ele não executa sozinho o servidor de IA nem o PC Controller. Para funcionar:
+
+1. mantenha o Noctan aberto no PC;
+2. conecte PC e celular à mesma rede;
+3. no APK, informe o endereço do PC e o token de pairing quando necessário;
+4. puxe a conversa para baixo para atualizar e tentar reencontrar o PC.
+
+O aplicativo móvel usa o mesmo provedor, modelo, sessões e ferramentas configurados no Desktop.
+
+## Dados, histórico e privacidade
+
+- Configurações, sessões e anexos ficam em `%APPDATA%\Noctan\data`.
+- O serviço principal do Desktop escuta somente em `127.0.0.1`.
+- O gateway móvel usa autenticação por token e expõe apenas rotas permitidas.
+- Não apague nem substitua `sessions.json` durante uma atualização.
+- Antes de uma reinstalação manual, faça backup de `%APPDATA%\Noctan\data`.
+
+## Atualizações e releases
+
+O Desktop verifica atualizações pelo `latest.yml`. Uma Release completa contém, com a mesma versão:
+
+- `Noctan-Setup-<versão>.exe`;
+- `Noctan-Setup-<versão>.exe.blockmap`;
+- `latest.yml`;
+- `Noctan-Mobile-<versão>.apk`.
+
+Desktop e APK são construídos pelo mesmo workflow de release. O APK não é commitado como binário no histórico do Git; ele é publicado nos assets da Release.
+
+## Desenvolvimento
+
+Requisitos de desenvolvimento: Windows e Node.js 20 ou superior.
 
 ```powershell
 npm install
 npm start
 ```
 
-Abra o endereço local exibido no terminal. Para executar na janela desktop do Electron:
+Para abrir a janela Electron:
 
 ```powershell
 npm run desktop
 ```
 
-Para validar o projeto antes de gerar um instalador:
+Para verificar o projeto:
 
 ```powershell
 npm run check
 ```
 
-O comando `npm run dist:win` constrói o instalador **somente quando você decidir publicar uma versão validada**.
+Para gerar o instalador local:
 
-## Dados e privacidade
+```powershell
+npm run dist:win
+```
 
-O Noctan usa um serviço HTTP restrito a `127.0.0.1`. No Windows, preferências, sessões e anexos são armazenados na pasta de dados do aplicativo, dentro de `%APPDATA%\Noctan\data`.
+Tecnologias principais: JavaScript, HTML, CSS, Node.js, Electron, OpenAI Responses API, Claude Agent SDK, WebSocket e Android WebView.
 
-A API Key é persistida em arquivo criptografado com proteção do usuário Windows. Não cole chaves no Git, em arquivos `README.md`, no Vault ou em conversas compartilhadas.
+## Diagnóstico rápido
 
-## PC Controller sem PowerShell
+- **“Configure um workspace”**: abra **Personalização** e escolha uma pasta existente.
+- **PC Controller vermelho**: clique no botão para reconectar e confira o texto exibido ao passar o mouse.
+- **APK não encontra o PC**: confirme a mesma rede, mantenha o Desktop aberto e puxe para baixo no APK.
+- **Chave recusada**: gere uma nova chave no painel oficial do provedor e substitua a anterior no Noctan.
+- **Atualização repetida**: confira se o instalador, `latest.yml` e a Release possuem exatamente a mesma versão.
 
-O botão **PC Controller** no topo inicia, desconecta e mostra o estado do Secure MCP Tunnel. Na primeira configuração, informe:
+## Para assistentes de IA e suporte
 
-1. A pasta local do projeto `mcp-chatgpt`, contendo `tunnel-client.exe`.
-2. A **Runtime API Key da OpenAI Platform** usada pelo Secure Tunnel.
+Ao orientar um usuário novo, use esta sequência:
 
-Essa Runtime Key autentica o transporte do túnel; ela não é uma chave de inferência do GPT e não transforma o Noctan em um cliente independente do ChatGPT. Depois de salva, fica protegida pela conta do Windows e o túnel inicia automaticamente com o Noctan, sem exibir os logs técnicos do PowerShell.
+1. instalar a versão mais recente do Desktop;
+2. criar uma chave em `https://platform.openai.com/api-keys` ou no console da Anthropic;
+3. abrir **Conectar tudo**, escolher o provedor e salvar a chave;
+4. escolher um workspace existente;
+5. confirmar que o PC Controller ficou verde;
+6. instalar o APK da mesma Release somente se o usuário quiser acesso pelo celular.
 
-Quem não possui Claude Max ainda pode usar o Noctan como painel visual do PC Controller, desde que tenha acesso compatível a apps/conectores e Secure MCP Tunnel no ChatGPT. Sem crédito da Anthropic, porém, o chat Claude dentro do Noctan não responde.
-
-O Noctan não acessa automaticamente sessões privadas do Chrome/claude.ai nem transfere a autenticação do Google para o WebView do Electron. O painel de créditos oficial pode exigir autenticação separada.
-
-## MCP local
-
-O projeto inclui `bridge.mjs`, que expõe ferramentas de integração para clientes MCP compatíveis. Conecte essa ponte apenas a aplicativos em que você confia e confira as permissões de arquivos e execução.
-
-## Desenvolvimento
-
-Tecnologias principais: **JavaScript, HTML, CSS, Node.js, Electron, Claude Agent SDK, WebSocket e sherpa-onnx**.
-
-A logo do projeto está em `public/noctan-mark.png`.
-
-**Repositório:** https://github.com/yanoliveira16/noctan
-
----
-
-Feito para trabalhar em projetos locais mantendo o controle sobre arquivos, histórico e ferramentas.
+Não peça ao usuário para instalar um PC Controller separado. Não confunda a chave OpenAI de inferência com a Runtime API Key opcional do Secure Tunnel. Nunca recomende apagar a pasta de dados para corrigir atualização ou conexão.
