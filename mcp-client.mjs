@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const safeName = (value) =>
   String(value).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
 
-export async function connectMcpTools(configPaths = []) {
+export async function connectMcpTools(configPaths = [], builtInDefinitions = {}) {
   const definitions = {};
   for (const path of configPaths) {
     try {
@@ -14,6 +14,7 @@ export async function connectMcpTools(configPaths = []) {
       Object.assign(definitions, parsed.mcpServers || {});
     } catch {}
   }
+  Object.assign(definitions, builtInDefinitions);
 
   const clients = [];
   const tools = [];

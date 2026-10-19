@@ -107,7 +107,7 @@ public class MainActivity extends Activity {
                 try {
                     startActivityForResult(intent, VOICE_REQUEST);
                 } catch (Exception error) {
-                    sendVoiceError("Reconhecimento de voz indisponÃƒÆ’Ã‚Â­vel");
+                    sendVoiceError("Reconhecimento de voz indisponível");
                 }
             });
         }

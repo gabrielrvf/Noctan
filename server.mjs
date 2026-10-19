@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { saveApiKey, loadApiKey, removeApiKey } from "./secure-key.mjs";
 import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelStatusLive } from "./tunnel-manager.mjs";
 import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
+import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embedded-pc-controller.mjs";
 import { fileURLToPath } from "node:url";
 const BASE = dirname(fileURLToPath(import.meta.url));
 function resolveClaudeCodeExecutable() {
@@ -172,7 +173,7 @@ async function saveJson(path,obj) {
 }
 
 async function deleteSessionById(id) {
-  if (!id || active.has(id)) throw Error("NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel apagar uma conversa em execuÃƒÂ§ÃƒÂ£o.");
+  if (!id || active.has(id)) throw Error("Não é possível apagar uma conversa em execução.");
   await mkdir(dirname(SESSIONS), { recursive: true });
   const lock = await takeSessionsLock();
   const taken = true;
@@ -193,7 +194,7 @@ async function deleteSessionById(id) {
 async function appendSessionNotice(id, text, meta = {}) {
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
+  if (!session) throw Error("Conversa não encontrada");
   const item = { role: "system", text: String(text || "").trim().slice(0, 2000), kind: String(meta.kind || "notice").slice(0, 40), model: meta.model ? String(meta.model).slice(0, 120) : undefined, at: new Date().toISOString() };
   if (!item.text) throw Error("Aviso vazio");
   session.messages.push(item); session.updatedAt = item.at; sessions[id] = session;
@@ -204,12 +205,12 @@ async function appendSessionNotice(id, text, meta = {}) {
 }
 
 async function editSessionUserMessage(id, index, text) {
-  if (active.has(id)) throw Error("Pare a execuÃƒÂ§ÃƒÂ£o antes de editar uma mensagem.");
+  if (active.has(id)) throw Error("Pare a execução antes de editar uma mensagem.");
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
+  if (!session) throw Error("Conversa não encontrada");
   const target = session.messages && session.messages[index];
-  if (!target || target.role !== "user") throw Error("Mensagem de usuÃƒÂ¡rio nÃƒÂ£o encontrada");
+  if (!target || target.role !== "user") throw Error("Mensagem de usuário não encontrada");
   const nextText = String(text || "").trim();
   if (!nextText || nextText.length > 40000) throw Error("Mensagem vazia ou muito longa.");
   target.text = nextText; target.editedAt = new Date().toISOString();
@@ -227,7 +228,7 @@ async function saveImageAttachments(items) {
   await mkdir(ATTACHMENTS, { recursive: true });
   for (const item of attachments) {
     const match = String(item?.dataUrl || "").match(/^data:([^;]{1,120});base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw Error("Formato de anexo nÃƒÂ£o permitido.");
+    if (!match) throw Error("Formato de anexo não permitido.");
     const bytes = Buffer.from(match[2], "base64");
     if (bytes.length > 20_000_000) throw Error("Anexo maior que 20 MB.");
     const mime = String(match[1] || "application/octet-stream").toLowerCase();
@@ -250,8 +251,8 @@ async function saveImageAttachments(items) {
 async function pushLiveFollowUp(body) {
   const id = String(body.sessionId || "");
   const running = active.get(id);
-  if (!running) throw Error("NÃƒÂ£o hÃƒÂ¡ execuÃƒÂ§ÃƒÂ£o ativa nesta conversa.");
-  if (running.provider !== "anthropic") throw Error("Follow-up ao vivo estÃƒÂ¡ disponÃƒÂ­vel para o Claude.");
+  if (!running) throw Error("Não há execução ativa nesta conversa.");
+  if (running.provider !== "anthropic") throw Error("Follow-up ao vivo está disponível para o Claude.");
 
   const text = String(body.prompt || "").trim();
   const savedAttachments = await saveImageAttachments(body.attachments);
@@ -260,7 +261,7 @@ async function pushLiveFollowUp(body) {
 
   sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
   const session = sessions[id];
-  if (!session) throw Error("Conversa nÃƒÂ£o encontrada");
+  if (!session) throw Error("Conversa não encontrada");
 
   running.segmentBreakRequested = true;
   const item = {
@@ -277,7 +278,7 @@ async function pushLiveFollowUp(body) {
   await saveJson(SESSIONS, sessions);
 
   const attachmentContext = savedAttachments.length
-    ? "\n\nArquivos anexados pelo usuÃƒÂ¡rio agora (use as ferramentas disponÃƒÂ­veis para lÃƒÂª-los/inspecionÃƒÂ¡-los):\n" +
+    ? "\n\nArquivos anexados pelo usuário agora (use as ferramentas disponíveis para lê-los/inspecioná-los):\n" +
       savedAttachments.map((path) => "- " + path).join("\n")
     : "";
   const userContent = normalizeChromeCommand(text || "Analise os arquivos anexados.") + attachmentContext;
@@ -305,8 +306,8 @@ async function pushLiveFollowUp(body) {
   if (running.res) {
     send(running.res, "notice", {
       text: savedAttachments.length
-        ? "Nova mensagem com imagem recebida durante a execuÃƒÂ§ÃƒÂ£o."
-        : "Nova mensagem recebida durante a execuÃƒÂ§ÃƒÂ£o.",
+        ? "Nova mensagem com imagem recebida durante a execução."
+        : "Nova mensagem recebida durante a execução.",
       kind: "follow-up",
     });
   }
@@ -317,7 +318,7 @@ const readBody = async (req) => {
   let s = "";
   for await (const c of req) {
     s += c;
-    if (s.length > 20_000_000) throw Error("RequisiÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o muito grande");
+    if (s.length > 20_000_000) throw Error("Requisição muito grande");
   }
   return JSON.parse(s || "{}");
 };
@@ -438,7 +439,7 @@ async function getTranscriber() {
 function decodePcm16(base64) {
   const bytes = Buffer.from(base64, "base64");
   if (bytes.length < 2 || bytes.length > 12_000_000)
-    throw Error("ÃƒÆ’Ã‚Âudio vazio ou maior que o limite permitido.");
+    throw Error("Áudio vazio ou maior que o limite permitido.");
   const samples = new Float32Array(Math.floor(bytes.length / 2));
   for (let index = 0; index < samples.length; index += 1)
     samples[index] = bytes.readInt16LE(index * 2) / 32768;
@@ -482,7 +483,7 @@ async function runAgent(req, res) {
       const match = String(item?.dataUrl || "").match(
         /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/,
       );
-      if (!match) throw Error("Formato de imagem nÃƒÆ’Ã‚Â£o permitido.");
+      if (!match) throw Error("Formato de imagem não permitido.");
       const bytes = Buffer.from(match[2], "base64");
       if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
       const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
@@ -494,7 +495,7 @@ async function runAgent(req, res) {
   const prompt = [
     normalizeChromeCommand(originalPrompt || "Analise as imagens anexadas."),
     savedAttachments.length
-      ? `\nImagens anexadas pelo usuÃƒÆ’Ã‚Â¡rio (use a ferramenta Read para visualizÃƒÆ’Ã‚Â¡-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
+      ? `\nImagens anexadas pelo usuário (use a ferramenta Read para visualizá-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
       : "",
   ].join("");
   sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
@@ -607,8 +608,9 @@ async function runAgent(req, res) {
         previousResponseId: s.openaiResponseId,
         instructions:
           config.systemInstructions +
-          `\nWorkspace local: ${config.workspace}. Vault: ${config.vault || "nÃƒÆ’Ã‚Â£o configurado"}. Use as ferramentas MCP disponÃƒÆ’Ã‚Â­veis quando necessÃƒÆ’Ã‚Â¡rio. Nunca revele segredos.`,
+          `\nWorkspace local: ${config.workspace}. Vault: ${config.vault || "não configurado"}. Use as ferramentas MCP disponíveis quando necessário. Nunca revele segredos.`,
         mcpConfigPaths: config.mcpConfigPaths,
+        mcpServers: { "pc-controller": embeddedPcControllerDefinition() },
         signal: ctrl.signal,
         approve: askApproval,
         onTool: (name, input) =>
@@ -653,11 +655,10 @@ async function runAgent(req, res) {
       opts.plugins = config.pluginPaths
         .filter(existsSync)
         .map((path) => ({ type: "local", path }));
-    if (config.mcpConfigPaths.length)
-      opts.mcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
+    opts.mcpServers = await runtimeMcpServers();
     opts.canUseTool = async (toolName, input) => {
       if (ctrl.signal.aborted)
-        return { behavior: "deny", message: "ExecuÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o cancelada" };
+        return { behavior: "deny", message: "Execução cancelada" };
       if (config.bypassAllPermissions || active.get(id)?.autoApproveAll)
         return { behavior: "allow", updatedInput: input };
       const aid = randomUUID();
@@ -665,7 +666,7 @@ async function runAgent(req, res) {
       return await new Promise((resolve) => {
         const timer = setTimeout(() => {
           approvals.delete(aid);
-          resolve({ behavior: "deny", message: "AprovaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o expirou" });
+          resolve({ behavior: "deny", message: "Aprovação expirou" });
         }, 120000);
         approvals.set(aid, {
           sessionId: id,
@@ -675,21 +676,21 @@ async function runAgent(req, res) {
             resolve(
               allowed
                 ? { behavior: "allow", updatedInput: input }
-                : { behavior: "deny", message: "Negado pelo usuÃƒÆ’Ã‚Â¡rio" },
+                : { behavior: "deny", message: "Negado pelo usuário" },
             );
           },
         });
       });
     };
-    const crashResumePrompt = "A execuÃƒÂ§ÃƒÂ£o anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessÃƒÂ£o. NÃƒÂ£o repita aÃƒÂ§ÃƒÂµes, comandos, alteraÃƒÂ§ÃƒÂµes, commits, deploys ou etapas que jÃƒÂ¡ tenham sido concluÃƒÂ­dos. Primeiro confira o contexto e resultados jÃƒÂ¡ presentes na sessÃƒÂ£o; depois continue apenas o que ficou pendente. Preserve todas as instruÃƒÂ§ÃƒÂµes e follow-ups do usuÃƒÂ¡rio jÃƒÂ¡ recebidos.";
+    const crashResumePrompt = "A execução anterior desta mesma conversa foi interrompida porque o aplicativo/processo fechou inesperadamente. Retome exatamente do ponto em que parou usando o estado desta sessão. Não repita ações, comandos, alterações, commits, deploys ou etapas que já tenham sido concluídos. Primeiro confira o contexto e resultados já presentes na sessão; depois continue apenas o que ficou pendente. Preserve todas as instruções e follow-ups do usuário já recebidos.";
     let effectivePrompt = resumeInterrupted ? crashResumePrompt : prompt;
     if (historyForRebuild.length) {
       const rebuilt = historyForRebuild
         .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
         .slice(-80)
-        .map((m) => "[" + (m.role === "user" ? "UsuÃƒÂ¡rio" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
+        .map((m) => "[" + (m.role === "user" ? "Usuário" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
         .join("\n\n");
-      effectivePrompt = "Contexto reconstruÃƒÂ­do da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
+      effectivePrompt = "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
     }
     let retriedMissingSession = false;
     let retriedTerminatedToolSession = false;
@@ -906,6 +907,9 @@ async function mergeMcpConfigs(paths) {
   }
   return all;
 }
+async function runtimeMcpServers() {
+  return withEmbeddedPcController(await mergeMcpConfigs(config.mcpConfigPaths));
+}
 async function findPluginPaths(root, depth = 0) {
   if (!root || depth > 5 || !existsSync(root)) return [];
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
@@ -931,9 +935,8 @@ async function discover() {
     join(home, "OneDrive", "Documentos", "AI_Memory_Vault"),
   ];
   const pluginRoot = join(claude, "plugins");
-  const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
-  const pcControllerMcp = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
-  const localPc = await localPcControllerStatus(Boolean(pcControllerMcp));
+  const pcControllerMcp = embeddedPcControllerDefinition();
+  const localPc = await localPcControllerStatus(true);
   return {
     platform: platform(),
     home,
@@ -985,7 +988,7 @@ async function staticFile(res, path) {
     "/style.css": "style.css",
     "/noctan-mark.png": "noctan-mark.png",
   };
-  if (!files[path]) return json(res, 404, { error: "NÃƒÆ’Ã‚Â£o encontrado" });
+  if (!files[path]) return json(res, 404, { error: "Não encontrado" });
   const file = join(BASE, "public", files[path]);
   const ext = path.endsWith(".js")
     ? "text/javascript"
@@ -1066,7 +1069,7 @@ if (config.autoStartTunnel && process.env.NOCTAN_TUNNEL_RUNTIME_KEY) {
   try {
     await startTunnel({ controllerPath: config.pcControllerPath, profile: config.tunnelProfile, runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY });
   } catch (error) {
-    console.warn(`Noctan: PC Controller nÃƒÆ’Ã‚Â£o iniciou: ${error.message}`);
+    console.warn(`Noctan: PC Controller não iniciou: ${error.message}`);
   }
 }
 // Vigia do túnel do ChatGPT (2026-10-19): se cair (rede, sono do PC, processo morto), sobe de novo sozinho a cada
@@ -1082,9 +1085,8 @@ setInterval(async () => {
   }
 }, 60_000).unref();
 try {
-  const bootMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
-  const bootPcController = bootMcpServers["pc-controller"] || bootMcpServers["pc_controller"] || null;
-  if (bootPcController) connectLocalPcController(bootPcController).catch((error) => console.warn(`Noctan: PC Controller local nÃƒÆ’Ã‚Â£o iniciou: ${error.message}`));
+  const bootPcController = embeddedPcControllerDefinition();
+  connectLocalPcController(bootPcController).catch((error) => console.warn(`Noctan: PC Controller local não iniciou: ${error.message}`));
 } catch (error) {
   console.warn(`Noctan: falha preparando PC Controller local: ${error.message}`);
 }
@@ -1098,7 +1100,7 @@ const server = http.createServer(async (req, res) => {
         req.headers.origin,
       )
     )
-      return json(res, 403, { error: "Origem nÃƒÆ’Ã‚Â£o autorizada" });
+      return json(res, 403, { error: "Origem não autorizada" });
     if (
       req.method === "GET" &&
       ["/", "/app.js", "/style.css", "/noctan-mark.png"].includes(path)
@@ -1141,9 +1143,9 @@ const server = http.createServer(async (req, res) => {
       const id = path.split("/").pop();
       try {
         const deleted = await deleteSessionById(id);
-        return json(res, deleted ? 200 : 404, deleted ? { ok: true, id } : { error: "Conversa nÃƒÂ£o encontrada" });
+        return json(res, deleted ? 200 : 404, deleted ? { ok: true, id } : { error: "Conversa não encontrada" });
       } catch (error) {
-        return json(res, /execuÃƒÂ§ÃƒÂ£o/.test(String(error.message)) ? 409 : 500, { error: String(error.message || error) });
+        return json(res, /execução/.test(String(error.message)) ? 409 : 500, { error: String(error.message || error) });
       }
     }
     if (req.method === "POST" && path === "/api/connect") {
@@ -1165,17 +1167,12 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, provider, apiKeyConfigured: false });
     }
     if (req.method === "POST" && path === "/api/pc-controller/connect") {
-      const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
-      const definition = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
-      if (!definition) return json(res, 409, { error: "PC Controller nÃƒÆ’Ã‚Â£o configurado nos MCPs." });
-      return json(res, 200, await connectLocalPcController(definition));
+      return json(res, 200, await connectLocalPcController(embeddedPcControllerDefinition()));
     }
     if (req.method === "POST" && path === "/api/pc-controller/disconnect")
       return json(res, 200, await disconnectLocalPcController());
     if (req.method === "GET" && path === "/api/pc-controller/status") {
-      const configuredMcpServers = await mergeMcpConfigs(config.mcpConfigPaths);
-      const definition = configuredMcpServers["pc-controller"] || configuredMcpServers["pc_controller"] || null;
-      return json(res, 200, await localPcControllerStatus(Boolean(definition)));
+      return json(res, 200, await localPcControllerStatus(true));
     }
     if (req.method === "POST" && path === "/api/tunnel/connect") {
       const body = await readBody(req);
@@ -1277,7 +1274,7 @@ const server = http.createServer(async (req, res) => {
         const result = await editSessionUserMessage(editMatch[1], Number(editMatch[2]), body.text);
         return json(res, 200, { ok: true, index: result.index });
       } catch (error) {
-        return json(res, /execuÃƒÂ§ÃƒÂ£o/.test(String(error.message)) ? 409 : 400, { error: String(error.message || error) });
+        return json(res, /execução/.test(String(error.message)) ? 409 : 400, { error: String(error.message || error) });
       }
     }
     if (req.method === "POST" && path === "/api/run")
@@ -1289,7 +1286,7 @@ const server = http.createServer(async (req, res) => {
         a = approvals.get(b.id);
       if (!a)
         return json(res, 404, {
-          error: "AprovaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o nÃƒÆ’Ã‚Â£o encontrada ou expirada",
+          error: "Aprovação não encontrada ou expirada",
         });
       if (b.bypassAll === true && b.allow === true) {
         config.bypassAllPermissions = true;
@@ -1310,20 +1307,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && path === "/api/cancel") {
       const b = await readBody(req),
         a = active.get(b.sessionId);
-      if (!a) return json(res, 404, { error: "ExecuÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o nÃƒÆ’Ã‚Â£o encontrada" });
+      if (!a) return json(res, 404, { error: "Execução não encontrada" });
       a.ctrl.abort();
       for (const [k, v] of approvals)
         if (v.sessionId === b.sessionId) v.decide(false);
       return json(res, 200, { ok: true });
     }
-    return json(res, 404, { error: "Rota nÃƒÆ’Ã‚Â£o encontrada" });
+    return json(res, 404, { error: "Rota não encontrada" });
   } catch (e) {
     if (!res.headersSent) respondError(res, e);
     else res.end();
   }
 });
 server.listen(PORT, HOST, () =>
-  console.log(`Noctan disponÃƒÆ’Ã‚Â­vel em http://${HOST}:${PORT}`),
+  console.log(`Noctan disponível em http://${HOST}:${PORT}`),
 );
 const { WebSocketServer } = await import("ws");
 const { Worker } = await import("node:worker_threads");

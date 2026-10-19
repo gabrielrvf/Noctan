@@ -1079,10 +1079,10 @@ function updateConnectState() {
     d.vaultExists || d.vaultCandidates?.length ? "Conectado" : "N\u00e3o encontrado";
   $("mcpState").textContent = d.mcpConfigs?.length
     ? d.mcpConfigs.length + " fontes"
-    : "NÃ£o encontrados";
+    : "Não encontrados";
   $("pluginState").textContent = d.pluginRoot
     ? "Conectados"
-    : "NÃ£o encontrados";
+    : "Não encontrados";
 }
 function openConnect() {
   updateConnectState();

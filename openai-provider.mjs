@@ -10,6 +10,7 @@ export async function runOpenAI({
   previousResponseId,
   instructions,
   mcpConfigPaths = [],
+  mcpServers = {},
   signal,
   allowTools = true,
   approve,
@@ -17,7 +18,7 @@ export async function runOpenAI({
 }) {
   const client = new OpenAI({ apiKey });
   const mcp = allowTools
-    ? await connectMcpTools(mcpConfigPaths)
+    ? await connectMcpTools(mcpConfigPaths, mcpServers)
     : { tools: [], call: async () => "", close: async () => {} };
   const tools = allowTools
     ? [{ type: "web_search" }, ...mcp.tools]
