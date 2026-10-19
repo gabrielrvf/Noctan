@@ -8,6 +8,7 @@ let state = {
   remoteRunning: false,
   renderedMessageCount: 0,
   renderedCounts: new Map(),
+  liveRuns: new Map(),
   cost: 0,
   attachments: [],
   provider: "anthropic",
@@ -481,6 +482,7 @@ async function loadSession(id) {
     show($("cancel"), true);
     // ponytail: aprovação pedida em segundo plano só aparece se a execução for reaberta pelo servidor; hoje fica aguardando.
     $("runStatus").textContent = "Executando em segundo plano...";
+    restoreLiveProgress(id);
     const poll = async () => {
       if (state.current !== id || state.running) return;
       const r = await request("/api/sessions/" + id).catch(() => null);
@@ -589,6 +591,50 @@ let assistantSegmentEpoch = 0;
 let progressUI=null;
 let progressStarted=0;
 let progressTicker=null;
+
+function ensureLiveRunMeta(sessionId) {
+  if (!sessionId) return null;
+  let meta = state.liveRuns.get(sessionId);
+  if (!meta) {
+    meta = { startedAt: Date.now(), events: [], realStatus: "", active: true };
+    state.liveRuns.set(sessionId, meta);
+  }
+  return meta;
+}
+function recordLiveRunEvent(sessionId, text, realStatus = "") {
+  const meta = ensureLiveRunMeta(sessionId);
+  if (!meta) return;
+  meta.active = true;
+  if (realStatus) meta.realStatus = realStatus;
+  meta.events.push({ at: Date.now(), text: String(text || "") });
+  if (meta.events.length > 120) meta.events.shift();
+}
+function restoreLiveProgress(sessionId) {
+  const meta = state.liveRuns.get(sessionId);
+  if (!meta || !meta.active || state.current !== sessionId) return;
+  endProgress();
+  progressStarted = meta.startedAt || Date.now();
+  const details=document.createElement("details");
+  details.className="agentProgress";
+  const summary=document.createElement("summary");
+  const icon=document.createElement("img");
+  icon.className="agentSpinner"; icon.src="/noctan-mark.png"; icon.alt="";
+  const headline=document.createElement("span");
+  summary.append(icon,headline);
+  const log=document.createElement("div"); log.className="agentProgressLog";
+  details.append(summary,log);
+  $("chat").append(details);
+  progressUI={details,summary,headline,log,realStatus:meta.realStatus || ""};
+  for (const event of meta.events) {
+    const item=document.createElement("div");
+    item.textContent=new Date(event.at).toLocaleTimeString("pt-BR")+"  -  "+event.text;
+    log.append(item);
+  }
+  clearInterval(progressTicker);
+  progressHeadline();
+  progressTicker=setInterval(progressHeadline,650);
+  $("chat").scrollTop=$("chat").scrollHeight;
+}
 const thinkingMessages=["Pensando...","Lendo o contexto...","Organizando as ideias...","Consultando o Vault...","Conectando ferramentas...","Descombobulando..."];
 function formatElapsed(seconds){
   if(seconds<60)return seconds+"s";
@@ -610,8 +656,10 @@ function progressHeadline(){
   const randomLabel=thinkingMessages[Math.floor(seconds/3)%thinkingMessages.length];
   progressUI.headline.textContent=(progressUI.realStatus || randomLabel)+"  -  "+formatElapsed(seconds);
 }
-function beginProgress(){
-  progressStarted=Date.now();
+function beginProgress(sessionId = state.current){
+  const meta = ensureLiveRunMeta(sessionId);
+  if (meta) { meta.startedAt = meta.startedAt || Date.now(); meta.active = true; }
+  progressStarted=meta?.startedAt || Date.now();
   const details=document.createElement("details");
   details.className="agentProgress";
   const summary=document.createElement("summary");
@@ -745,10 +793,11 @@ async function send() {
   }
   if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
   setRunning(true);
-  beginProgress();
-  const runViewEpoch = viewEpoch;
+  const targetMeta = ensureLiveRunMeta(targetSessionId);
+  if (targetMeta) { targetMeta.startedAt = Date.now(); targetMeta.events = []; targetMeta.realStatus = ""; targetMeta.active = true; }
+  beginProgress(targetSessionId);
   let streamSessionId = targetSessionId;
-  const ownsView = () => viewEpoch === runViewEpoch && (!streamSessionId || state.current === streamSessionId);
+  const ownsView = () => Boolean(streamSessionId && state.current === streamSessionId);
   let response = null;
   let assistant = null;
   let assistantSegmentSeen = assistantSegmentEpoch;
@@ -807,7 +856,16 @@ async function send() {
           continue;
         }
         if (type === "start") {
+          const previousStreamSessionId = streamSessionId;
           streamSessionId = data.sessionId;
+          if (!state.liveRuns.has(streamSessionId)) {
+            state.liveRuns.set(streamSessionId, { startedAt: progressStarted || Date.now(), events: [], realStatus: "", active: true });
+          }
+          if (previousStreamSessionId && previousStreamSessionId !== streamSessionId && state.liveRuns.has(previousStreamSessionId)) {
+            const meta = state.liveRuns.get(previousStreamSessionId);
+            state.liveRuns.delete(previousStreamSessionId);
+            state.liveRuns.set(streamSessionId, meta);
+          }
           if (ownsView()) {
             state.current = data.sessionId;
             await refresh();
@@ -815,24 +873,30 @@ async function send() {
           }
         }
         if (type === "text") {
+          recordLiveRunEvent(streamSessionId, "Respondendo");
           if (!ownsView()) continue;
           updateProgress("Respondendo");
           if (assistantSegmentSeen !== assistantSegmentEpoch) {
             assistant = null;
             assistantSegmentSeen = assistantSegmentEpoch;
           }
-          if (!assistant) assistant = message("assistant", "");
+          if (!assistant || !assistant.isConnected) {
+            const existing = [...document.querySelectorAll(".message.assistant")].at(-1);
+            assistant = existing || message("assistant", "");
+          }
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
           renderMarkdown(assistant, assistant.rawText);
           keepProgressLast();
         }
         if (type === "tool") {
+          recordLiveRunEvent(streamSessionId, "Usando ferramenta: "+String(data.name || "ferramenta"), "Usando ferramenta");
           if (!ownsView()) continue;
           keepProgressLast();
           updateProgress("Usando ferramenta: "+String(data.name || "ferramenta"));
           addProgressEvent(JSON.stringify(data.input || {}).slice(0,600));
         }
         if (type === "init") {
+          recordLiveRunEvent(streamSessionId, "Agente inicializado");
           if (!ownsView()) continue;
           setSlashCommands(data.commands);
           renderSlashMenu();
@@ -841,8 +905,9 @@ async function send() {
           addProgressEvent("Ferramentas dispon\u00edveis: "+(data.tools || []).length);
         }
         if (type === "commands") { if (!ownsView()) continue; setSlashCommands(data.commands); renderSlashMenu(); }
-        if (type === "approval") { if (!ownsView()) continue; updateProgress("Aguardando autoriza\u00e7\u00e3o"); approval(data); }
+        if (type === "approval") { recordLiveRunEvent(streamSessionId, "Aguardando autorização", "Aguardando autorização"); if (!ownsView()) continue; updateProgress("Aguardando autoriza\u00e7\u00e3o"); approval(data); }
         if (type === "result") {
+          recordLiveRunEvent(streamSessionId, "Execução concluída");
           if (!ownsView()) continue;
           state.cost += data.costUsd || 0;
           updateCost();
@@ -864,6 +929,8 @@ async function send() {
     message("system", e.message);
   } finally {
     if (runAbort === ctrl) runAbort = null;
+    const finishedMeta = state.liveRuns.get(streamSessionId);
+    if (finishedMeta) finishedMeta.active = false;
     if (ctrl.signal.aborted || !ownsView()) return;
     endProgress();
     await refresh().catch(() => {});

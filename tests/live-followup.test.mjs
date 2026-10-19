@@ -73,12 +73,12 @@ test("send preflights liveActive and converts run races into follow-up for the c
   assert.match(app, /sessionId: targetSessionId/);
 });
 
-test("switching conversations cannot let stale streams mutate the new view", () => {
-  assert.match(app, /let viewEpoch = 0/);
-  assert.match(app, /const runViewEpoch = viewEpoch/);
-  assert.match(app, /const ownsView = \(\) => viewEpoch === runViewEpoch/);
+test("switching conversations isolates rendering by session while preserving the live stream", () => {
+  assert.match(app, /const ownsView = \(\) => Boolean\(streamSessionId && state\.current === streamSessionId\)/);
   assert.match(app, /if \(!ownsView\(\)\) continue/);
-  assert.match(app, /if \(ctrl\.signal\.aborted \|\| !ownsView\(\)\) return/);
+  assert.match(app, /recordLiveRunEvent\(streamSessionId/);
+  assert.match(app, /restoreLiveProgress\(id\)/);
+  assert.doesNotMatch(app, /const runViewEpoch = viewEpoch/);
 });
 
 test("native chrome command is not rewritten to third-party browser MCP", () => {
@@ -92,4 +92,19 @@ test("switching/opening a chat never auto-resumes an inFlight run", () => {
   assert.doesNotMatch(block, /await resumeInterruptedRun\(s\)/);
   assert.match(block, /Execução interrompida — pronta para retomar/);
   assert.match(block, /syntheticResume/);
+});
+
+test("conversation switching preserves the same live stream and elapsed progress", () => {
+  assert.match(app, /liveRuns: new Map\(\)/);
+  assert.match(app, /function ensureLiveRunMeta\(sessionId\)/);
+  assert.match(app, /function restoreLiveProgress\(sessionId\)/);
+  assert.match(app, /const ownsView = \(\) => Boolean\(streamSessionId && state\.current === streamSessionId\)/);
+  assert.match(app, /!assistant \|\| !assistant\.isConnected/);
+  assert.match(app, /recordLiveRunEvent\(streamSessionId/);
+  assert.doesNotMatch(app, /const ownsView = \(\) => viewEpoch === runViewEpoch/);
+});
+
+test("brand-new chats attach live metadata after receiving their session id", () => {
+  assert.match(app, /if \(!state\.liveRuns\.has\(streamSessionId\)\)/);
+  assert.match(app, /startedAt: progressStarted \|\| Date\.now\(\)/);
 });
