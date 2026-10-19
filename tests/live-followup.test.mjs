@@ -44,6 +44,15 @@ test("unexpected exit is checkpointed and resumed without duplicating user promp
   assert.match(app, /resumeInterrupted,/);
 });
 
+test("new chat works during a run and leaves it running in background", () => {
+  const newSession = app.slice(app.indexOf("function newSession()"), app.indexOf("let assistantSegmentEpoch"));
+  assert.doesNotMatch(newSession, /if \(state\.running\) return/);
+  assert.match(newSession, /detachRun\(\)/);
+  assert.match(app, /signal: ctrl\.signal/);
+  assert.match(app, /if \(s\.liveActive\)/);
+  assert.ok(app.indexOf("if (s.liveActive)") < app.indexOf("if (s.inFlight && !state.running)"), "background run must not be resumed as interrupted");
+});
+
 test("model changes create a persisted chat notice", () => {
   assert.match(server, /appendSessionNotice/);
   assert.match(app, /kind: "model-change"/);

@@ -423,7 +423,8 @@ async function refresh() {
   updateConnectState();
 }
 async function loadSession(id) {
-  if (state.running) return;
+  if (state.running && state.current === id) return;
+  detachRun();
   state.current = id;
   const s = await request("/api/sessions/" + id);
   setSlashCommands(s.slashCommands);
@@ -441,6 +442,19 @@ async function loadSession(id) {
   state.cost = cost;
   updateCost();
   updateSessions();
+  if (s.liveActive) {
+    // ponytail: aprovação pedida em segundo plano só aparece se a execução for reaberta pelo servidor; hoje fica aguardando.
+    $("runStatus").textContent = "Executando em segundo plano...";
+    const poll = async () => {
+      if (state.current !== id || state.running) return;
+      const r = await request("/api/sessions/" + id).catch(() => null);
+      if (state.current !== id || state.running) return;
+      if (!r || r.liveActive) setTimeout(poll, 3000);
+      else loadSession(id);
+    };
+    setTimeout(poll, 3000);
+    return;
+  }
   if (s.inFlight && !state.running) {
     await resumeInterruptedRun(s);
     return;
@@ -492,8 +506,17 @@ function togglePopover(id) {
     show(target, true);
   }
 }
+// Sai da conversa em execução sem pará-la: o servidor segue rodando e salva a resposta.
+let runAbort = null;
+function detachRun() {
+  if (!state.running) return;
+  runAbort?.abort();
+  endProgress();
+  setRunning(false);
+  show($("pending"), false);
+}
 function newSession() {
-  if (state.running) return;
+  detachRun();
   state.current = null;
   setPromptHistory(null);
   $("prompt").value = "";
@@ -662,9 +685,12 @@ async function send() {
   let response = null;
   let assistant = null;
   let assistantSegmentSeen = assistantSegmentEpoch;
+  const ctrl = new AbortController();
+  runAbort = ctrl;
   try {
     response = await fetch("/api/run", {
       method: "POST",
+      signal: ctrl.signal,
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         prompt,
@@ -747,10 +773,13 @@ async function send() {
     }
     await refresh();
   } catch (e) {
+    if (ctrl.signal.aborted) return;
     updateProgress("Falha na execu\u00e7\u00e3o");
     addProgressEvent(e.message);
     message("system", e.message);
   } finally {
+    if (runAbort === ctrl) runAbort = null;
+    if (ctrl.signal.aborted) return;
     endProgress();
     await refresh().catch(() => {});
     setRunning(false);
