@@ -36,6 +36,7 @@ test('renderer exposes update button and restart-to-update flow', () => {
 test('main branch publishes incrementing GitHub releases deterministically', () => {
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);
+  assert.match(workflow, /npm version --allow-same-version --no-git-tag-version/);
   assert.match(workflow, /electron-builder --win nsis --publish never/);
   assert.match(workflow, /gh release create .*--draft/);
   assert.match(workflow, /gh release upload/);

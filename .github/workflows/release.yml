@@ -33,7 +33,7 @@ jobs:
 
       - name: Set release version
         shell: pwsh
-        run: npm version --no-git-tag-version "1.0.${{ github.run_number }}"
+        run: npm version --allow-same-version --no-git-tag-version "1.0.${{ github.run_number }}"
 
       - name: Tests
         run: npm run check
