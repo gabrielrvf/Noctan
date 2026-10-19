@@ -18,7 +18,7 @@ test('packaged app has GitHub auto updater configured', () => {
   assert.match(desktop, /autoUpdater\.autoDownload = true/);
   assert.match(desktop, /autoUpdater\.autoInstallOnAppQuit = true/);
   assert.match(desktop, /checkForUpdates\(\)/);
-  assert.match(desktop, /quitAndInstall\(false, true\)/);
+  assert.match(desktop, /quitAndInstall\(true, true\)/); // silencioso: sem abrir o assistente do NSIS
   assert.match(desktop, /requestSingleInstanceLock\(\)/);
   assert.match(desktop, /isVersionStrictlyNewer\(info\?\.version, app\.getVersion\(\)\)/);
 });

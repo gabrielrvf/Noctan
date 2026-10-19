@@ -55,7 +55,7 @@ async function setupAutoUpdater() {
     if (updateState.status !== "downloaded") {
       return { ok: false, status: updateState.status };
     }
-    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
     return { ok: true };
   });
 
