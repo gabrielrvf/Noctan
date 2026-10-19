@@ -5,6 +5,8 @@ let state = {
   sessions: [],
   current: null,
   running: false,
+  remoteRunning: false,
+  renderedMessageCount: 0,
   cost: 0,
   attachments: [],
   provider: "anthropic",
@@ -82,6 +84,25 @@ const request = async (url, options = {}) => {
 };
 const show = (el, yes) => (el.hidden = !yes);
 let stopDictationForSend = async () => {};
+function repairDisplayText(value) {
+  let s = String(value ?? "");
+  const fixes = [
+    ["execu��o","execução"],["Execu��o","Execução"],["n�o","não"],["N�o","Não"],
+    ["est�","está"],["Est�","Está"],["poss�vel","possível"],["usu�rio","usuário"],
+    ["sess�o","sessão"],["Sess�o","Sessão"],["autoriza��o","autorização"],["Permiss�o","Permissão"],
+    ["altera��es","alterações"],["configura��o","configuração"],["pend�ncias","pendências"],
+    ["aten��o","atenção"],["lan�amento","lançamento"],["integra��es","integrações"],
+    ["monetiza��o","monetização"],["decis�es","decisões"],["pre�o","preço"],
+    ["migra��o","migração"],["padr�o","padrão"],["op��o","opção"],["produ��o","produção"],
+    ["informa��o","informação"],["raz�o","razão"],["jur�dico","jurídico"],
+    ["vari�vel","variável"],["autom�tico","automático"],["m�todo","método"],
+    ["cat�logo","catálogo"],["gr�tis","grátis"],["c�digo","código"],["�ltima","última"],
+    ["est�o","estão"],["s�o","são"],["tamb�m","também"],["j�","já"],["d�","dá"],
+    ["at�","até"],["s�","só"],["�","é"]
+  ];
+  for (const [bad, good] of fixes) s = s.split(bad).join(good);
+  return s;
+}
 const escapeHtml = (value) =>
   value.replace(
     /[&<>"']/g,
@@ -160,6 +181,7 @@ function renderMarkdown(element, text) {
   element.innerHTML = html;
 }
 function message(role, text, attachmentCount = 0, messageIndex = null) {
+  text = repairDisplayText(text);
   const e = document.createElement("div");
   e.className = "message " + role;
   e.rawText = text;
@@ -274,7 +296,7 @@ async function addImages(files) {
   renderAttachments();
 }
 async function deleteSession(id, title) {
-  if (state.running && state.current === id) {
+  if ((state.running || state.remoteRunning) && state.current === id) {
     alert("Pare a execu\u00e7\u00e3o antes de apagar esta conversa.");
     return;
   }
@@ -439,22 +461,36 @@ async function loadSession(id) {
     message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, index);
     cost += m.costUsd || 0;
   }
+  state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
   state.cost = cost;
   updateCost();
   updateSessions();
+  state.remoteRunning = Boolean(s.liveActive);
   if (s.liveActive) {
+    show($("cancel"), true);
     // ponytail: aprovação pedida em segundo plano só aparece se a execução for reaberta pelo servidor; hoje fica aguardando.
     $("runStatus").textContent = "Executando em segundo plano...";
     const poll = async () => {
       if (state.current !== id || state.running) return;
       const r = await request("/api/sessions/" + id).catch(() => null);
       if (state.current !== id || state.running) return;
-      if (!r || r.liveActive) setTimeout(poll, 3000);
+      state.remoteRunning = Boolean(r?.liveActive);
+      show($("cancel"), state.remoteRunning);
+      if (r?.messages && r.messages.length > state.renderedMessageCount) {
+        for (let i = state.renderedMessageCount; i < r.messages.length; i += 1) {
+          const m = r.messages[i];
+          message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, i);
+        }
+        state.renderedMessageCount = r.messages.length;
+      }
+      if (!r || r.liveActive) setTimeout(poll, 1500);
       else loadSession(id);
     };
     setTimeout(poll, 3000);
     return;
   }
+  state.remoteRunning = false;
+  show($("cancel"), false);
   if (s.inFlight && !state.running) {
     await resumeInterruptedRun(s);
     return;
@@ -646,7 +682,7 @@ async function send() {
   const resumeInterrupted = Boolean(state.resumeInterrupted);
   const prompt = resumeInterrupted ? "Retomar execução interrompida" : $("prompt").value.trim();
   if (!resumeInterrupted && !prompt && !state.attachments.length) return;
-  if (state.running && state.current) {
+  if ((state.running || state.remoteRunning) && state.current) {
     const attachments = [...state.attachments];
     if (!prompt && !attachments.length) return;
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }

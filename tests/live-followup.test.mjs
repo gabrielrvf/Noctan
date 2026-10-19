@@ -11,7 +11,7 @@ test("active Claude session accepts additive live steering", () => {
   assert.match(server, /priority: "now"/);
   assert.match(server, /origin: \{ kind: "human" \}/);
   assert.match(server, /steeringText/);
-  assert.match(app, /if \(state\.running && state\.current\)/);
+  assert.match(app, /state\.running \|\| state\.remoteRunning/);
   assert.match(app, /request\("\/api\/follow-up"/);
 });
 
@@ -61,4 +61,10 @@ test("model changes create a persisted chat notice", () => {
 test("speech recognizer is prewarmed before first dictation", () => {
   assert.match(app, /function prewarmStt/);
   assert.match(app, /takeWarmSttSocket/);
+});
+
+test("background active session streams persisted messages into the open chat", () => {
+  assert.match(app, /renderedMessageCount/);
+  assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
+  assert.match(app, /setTimeout\(poll, 1500\)/);
 });
