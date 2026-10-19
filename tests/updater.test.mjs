@@ -58,8 +58,8 @@ test('legacy configuration migration preserves workspace and protected keys', ()
   assert.match(server, /copyFile\(source, target\)/);
 });
 
-test('PC Controller is green when either local controller or tunnel is connected', () => {
-  assert.match(app, /const connected = localConnected \|\| tunnelConnected/);
+test('PC Controller is green only when local (if configured) AND tunnel (if key configured) are connected', () => {
+  assert.match(app, /const connected = \(localConnected \|\| !needLocal\) && \(tunnelConnected \|\| !needTunnel\)/);
   assert.match(app, /const failed = !busy && !connected/);
 });
 
