@@ -39,6 +39,13 @@ test("PC Controller local MCP is independent from Secure Tunnel",()=>{
  assert.match(js,/PC Controller conectado/); assert.match(js,/\/api\/tunnel\/connect/);
  assert.match(js,/state\.discovery\.pcController\?\.localMcpConfigured/);
 });
+
+test("terminated PC Controller tool sessions reconnect without duplicating the user prompt",()=>{
+  assert.match(server,/session terminated/i);
+  assert.match(server,/retriedTerminatedToolSession/);
+  assert.match(server,/tente novamente somente a chamada de ferramenta que falhou/);
+  assert.match(server,/Não repita a mensagem do usuário/);
+});
 test("README presents Noctan logo and product name",()=>{
  const docs=read("README.md");
  assert.match(docs,/public\/noctan-mark\.png/);

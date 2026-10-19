@@ -623,8 +623,10 @@ async function runAgent(req, res) {
       effectivePrompt = "Contexto reconstruÃƒÂ­do da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
     }
     let retriedMissingSession = false;
+    let retriedTerminatedToolSession = false;
     for (;;) {
       let missingSessionResult = null;
+      let terminatedToolSession = false;
       const q = query({ prompt: effectivePrompt, options: opts });
       const runningEntry = active.get(id);
       if (runningEntry) {
@@ -636,6 +638,11 @@ async function runAgent(req, res) {
       }
       try {
       for await (const m of q) {
+      if ((m.message?.content || []).some((block) =>
+        block?.type === "tool_result" && /session terminated/i.test(
+          typeof block.content === "string" ? block.content : JSON.stringify(block.content || ""),
+        )
+      )) terminatedToolSession = true;
       if (m.session_id) {
         s.claudeSessionId = m.session_id;
         if (s.inFlight) s.inFlight.lastCheckpointAt = new Date().toISOString();
@@ -680,6 +687,12 @@ async function runAgent(req, res) {
       } catch (error) {
         if (opts.resume && !retriedMissingSession && !finalText.trim() && isMissingClaudeSessionError(error)) missingSessionResult = error;
         else throw error;
+      }
+      if (!missingSessionResult && terminatedToolSession && !retriedTerminatedToolSession) {
+        retriedTerminatedToolSession = true;
+        effectivePrompt = "A sessão de uma ferramenta MCP foi encerrada durante a etapa anterior. A nova execução já recriou as conexões MCP. Continue exatamente do ponto em que parou e tente novamente somente a chamada de ferramenta que falhou com 'Session terminated'. Não repita a mensagem do usuário, comandos, alterações ou etapas já concluídas.";
+        send(res, "notice", { text: "O PC Controller perdeu a sessão; reconectei e vou repetir somente a ferramenta interrompida." });
+        continue;
       }
       if (!missingSessionResult) break;
       retriedMissingSession = true;
