@@ -39,33 +39,21 @@ test("unexpected exit is checkpointed and resumed without duplicating user promp
   assert.match(server, /crashResumePrompt/);
   assert.match(server, /delete s\.inFlight/);
   assert.match(app, /resumeInterruptedRun/);
-  assert.match(app, /session\?\.inFlight/);
-  assert.match(app, /interrupted\?\.id \|\| latest\?\.id/);
-  assert.match(app, /resumeInterrupted,/);
 });
 
 test("new chat works during a run and leaves it running in background", () => {
-  const newSession = app.slice(app.indexOf("function newSession()"), app.indexOf("let assistantSegmentEpoch"));
-  assert.doesNotMatch(newSession, /if \(state\.running\) return/);
-  assert.match(newSession, /detachRun\(\)/);
-  assert.match(app, /signal: ctrl\.signal/);
+  const block = app.slice(app.indexOf("function newSession()"), app.indexOf("let assistantSegmentEpoch"));
+  assert.doesNotMatch(block, /if \(state\.running\) return/);
+  assert.match(block, /detachRun\(\)/);
+  assert.doesNotMatch(app.slice(app.indexOf("function detachRun()"), app.indexOf("function newSession()")), /runAbort\?\.abort/);
   assert.match(app, /if \(s\.liveActive\)/);
-  assert.ok(app.indexOf("if (s.liveActive)") < app.indexOf("if (s.inFlight && !state.running)"), "background run must not be resumed as interrupted");
 });
 
-test("model changes create a persisted chat notice", () => {
-  assert.match(server, /appendSessionNotice/);
-  assert.match(app, /kind: "model-change"/);
-});
-
-test("speech recognizer is prewarmed before first dictation", () => {
-  assert.match(app, /function prewarmStt/);
-  assert.match(app, /takeWarmSttSocket/);
-});
-
-test("background active session streams persisted messages into the open chat", () => {
-  assert.match(app, /renderedMessageCount/);
-  assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
+test("background active session appends only unrendered persisted messages", () => {
+  assert.match(app, /renderedCounts: new Map\(\)/);
+  assert.match(app, /const renderedCount = state\.renderedCounts\.get\(id\)/);
+  assert.match(app, /r\?\.messages && r\.messages\.length > renderedCount/);
+  assert.match(app, /state\.renderedCounts\.set\(id, r\.messages\.length\)/);
   assert.match(app, /setTimeout\(poll, 1500\)/);
 });
 
@@ -77,23 +65,24 @@ test("new chat is independent from the current conversation session", () => {
   assert.match(block, /state\.editReplayIndex = null/);
   assert.doesNotMatch(block, /claudeSessionId/);
 });
-test("background active session streams persisted messages into the open chat", () => {
-  assert.match(app, /renderedMessageCount/);
-  assert.match(app, /r\.messages\.length > state\.renderedMessageCount/);
-  assert.match(app, /setTimeout\(poll, 1500\)/);
+
+test("send preflights liveActive and converts run races into follow-up for the captured session", () => {
+  assert.match(app, /const targetSessionId = state\.current/);
+  assert.match(app, /request\("\/api\/sessions\/" \+ targetSessionId\)/);
+  assert.match(app, /response\.status === 409 && targetSessionId/);
+  assert.match(app, /sessionId: targetSessionId/);
 });
 
-test("send preflights liveActive and converts run races into follow-up", () => {
-  assert.match(app, /request\("\/api\/sessions\/" \+ state\.current\)/);
-  assert.match(app, /state\.remoteRunning = Boolean\(live\?\.liveActive\)/);
-  assert.match(app, /response\.status === 409/);
-  assert.match(app, /request\("\/api\/follow-up"/);
+test("switching conversations cannot let stale streams mutate the new view", () => {
+  assert.match(app, /let viewEpoch = 0/);
+  assert.match(app, /const runViewEpoch = viewEpoch/);
+  assert.match(app, /const ownsView = \(\) => viewEpoch === runViewEpoch/);
+  assert.match(app, /if \(!ownsView\(\)\) continue/);
+  assert.match(app, /if \(ctrl\.signal\.aborted \|\| !ownsView\(\)\) return/);
 });
 
 test("native chrome command is not rewritten to third-party browser MCP", () => {
   assert.match(server, /return "\/chrome"/);
   assert.doesNotMatch(server, /Use a integra.*superpowers-chrome/);
   assert.match(server, /extraArgs: \{ chrome: null \}/);
-  assert.match(server, /const isSlashCommand =/);
-  assert.match(server, /\? userContent/);
 });

@@ -11,7 +11,7 @@ test("active run accepts image-only and text-plus-image follow-ups", () => {
   assert.match(server, /savedAttachments\.length/);
   assert.match(server, /priority: "now"/);
   assert.match(app, /const attachments = \[\.\.\.state\.attachments\]/);
-  assert.match(app, /JSON\.stringify\(\{ sessionId: state\.current, prompt, attachments \}\)/);
+  assert.match(app, /JSON\.stringify\(\{ sessionId: targetSessionId, prompt, attachments \}\)/);
   assert.match(app, /prompt \|\| "Imagem anexada"/);
 });
 

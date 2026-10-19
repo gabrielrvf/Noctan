@@ -7,6 +7,7 @@ let state = {
   running: false,
   remoteRunning: false,
   renderedMessageCount: 0,
+  renderedCounts: new Map(),
   cost: 0,
   attachments: [],
   provider: "anthropic",
@@ -453,6 +454,7 @@ async function refresh() {
 }
 async function loadSession(id) {
   if (state.running && state.current === id) return;
+  viewEpoch += 1;
   detachRun();
   state.current = id;
   const s = await request("/api/sessions/" + id);
@@ -469,7 +471,7 @@ async function loadSession(id) {
     cost += m.costUsd || 0;
   }
   state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
-  state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
+  state.renderedCounts.set(id, state.renderedMessageCount);
   state.cost = cost;
   updateCost();
   updateSessions();
@@ -484,12 +486,14 @@ async function loadSession(id) {
       if (state.current !== id || state.running) return;
       state.remoteRunning = Boolean(r?.liveActive);
       show($("cancel"), state.remoteRunning);
-      if (r?.messages && r.messages.length > state.renderedMessageCount) {
-        for (let i = state.renderedMessageCount; i < r.messages.length; i += 1) {
+      const renderedCount = state.renderedCounts.get(id) ?? state.renderedMessageCount;
+      if (r?.messages && r.messages.length > renderedCount) {
+        for (let i = renderedCount; i < r.messages.length; i += 1) {
           const m = r.messages[i];
           message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, i);
         }
         state.renderedMessageCount = r.messages.length;
+        state.renderedCounts.set(id, r.messages.length);
       }
       if (!r || r.liveActive) setTimeout(poll, 1500);
       else loadSession(id);
@@ -552,14 +556,17 @@ function togglePopover(id) {
 }
 // Sai da conversa em execução sem pará-la: o servidor segue rodando e salva a resposta.
 let runAbort = null;
+let viewEpoch = 0;
 function detachRun() {
   if (!state.running) return;
-  runAbort?.abort();
   endProgress();
-  setRunning(false);
+  state.running = false;
+  show($("cancel"), false);
   show($("pending"), false);
+  $("runStatus").textContent = "Aguardando mensagem";
 }
 function newSession() {
+  viewEpoch += 1;
   detachRun();
   state.current = null;
   state.remoteRunning = false;
@@ -693,16 +700,17 @@ async function send() {
   await stopDictationForSend();
   const resumeInterrupted = Boolean(state.resumeInterrupted);
   const prompt = resumeInterrupted ? "Retomar execução interrompida" : $("prompt").value.trim();
+  const targetSessionId = state.current;
   if (!resumeInterrupted && !prompt && !state.attachments.length) return;
-  if (state.current && !state.running && !resumeInterrupted) {
-    const live = await request("/api/sessions/" + state.current).catch(() => null);
+  if (targetSessionId && !state.running && !resumeInterrupted) {
+    const live = await request("/api/sessions/" + targetSessionId).catch(() => null);
     state.remoteRunning = Boolean(live?.liveActive);
     if (state.remoteRunning) {
       show($("cancel"), true);
       $("runStatus").textContent = "Executando em segundo plano...";
     }
   }
-  if ((state.running || state.remoteRunning) && state.current) {
+  if ((state.running || state.remoteRunning) && targetSessionId) {
     const attachments = [...state.attachments];
     if (!prompt && !attachments.length) return;
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
@@ -714,7 +722,7 @@ async function send() {
     try {
       await request("/api/follow-up", {
         method: "POST",
-        body: JSON.stringify({ sessionId: state.current, prompt, attachments }),
+        body: JSON.stringify({ sessionId: targetSessionId, prompt, attachments }),
       });
       state.attachments = [];
       renderAttachments();
@@ -738,6 +746,9 @@ async function send() {
   if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
   setRunning(true);
   beginProgress();
+  const runViewEpoch = viewEpoch;
+  let streamSessionId = targetSessionId;
+  const ownsView = () => viewEpoch === runViewEpoch && (!streamSessionId || state.current === streamSessionId);
   let response = null;
   let assistant = null;
   let assistantSegmentSeen = assistantSegmentEpoch;
@@ -751,7 +762,7 @@ async function send() {
       body: JSON.stringify({
         prompt,
         attachments,
-        sessionId: state.current,
+        sessionId: targetSessionId,
         provider: state.provider,
         editReplayIndex: replayEditIndex,
         resumeInterrupted,
@@ -761,10 +772,10 @@ async function send() {
     state.resumeInterrupted = false;
     if (!response.ok) {
       const j = await response.json();
-      if (response.status === 409 && state.current && /existe execu/i.test(String(j.error || ""))) {
+      if (response.status === 409 && targetSessionId && /existe execu/i.test(String(j.error || ""))) {
         await request("/api/follow-up", {
           method: "POST",
-          body: JSON.stringify({ sessionId: state.current, prompt, attachments }),
+          body: JSON.stringify({ sessionId: targetSessionId, prompt, attachments }),
         });
         state.remoteRunning = true;
         setRunning(false);
@@ -796,11 +807,15 @@ async function send() {
           continue;
         }
         if (type === "start") {
-          state.current = data.sessionId;
-          await refresh();
-          updateProgress("Preparando execu\u00e7\u00e3o");
+          streamSessionId = data.sessionId;
+          if (ownsView()) {
+            state.current = data.sessionId;
+            await refresh();
+            updateProgress("Preparando execu\u00e7\u00e3o");
+          }
         }
         if (type === "text") {
+          if (!ownsView()) continue;
           updateProgress("Respondendo");
           if (assistantSegmentSeen !== assistantSegmentEpoch) {
             assistant = null;
@@ -812,21 +827,23 @@ async function send() {
           keepProgressLast();
         }
         if (type === "tool") {
+          if (!ownsView()) continue;
           keepProgressLast();
           updateProgress("Usando ferramenta: "+String(data.name || "ferramenta"));
           addProgressEvent(JSON.stringify(data.input || {}).slice(0,600));
         }
         if (type === "init") {
+          if (!ownsView()) continue;
           setSlashCommands(data.commands);
           renderSlashMenu();
           keepProgressLast();
           updateProgress("Agente inicializado");
           addProgressEvent("Ferramentas dispon\u00edveis: "+(data.tools || []).length);
         }
-        if (type === "commands") { setSlashCommands(data.commands); renderSlashMenu(); }
-        if (type === "approval") updateProgress("Aguardando autoriza\u00e7\u00e3o");
-        if (type === "approval") approval(data);
+        if (type === "commands") { if (!ownsView()) continue; setSlashCommands(data.commands); renderSlashMenu(); }
+        if (type === "approval") { if (!ownsView()) continue; updateProgress("Aguardando autoriza\u00e7\u00e3o"); approval(data); }
         if (type === "result") {
+          if (!ownsView()) continue;
           state.cost += data.costUsd || 0;
           updateCost();
           updateProgress("Execu\u00e7\u00e3o conclu\u00edda");
@@ -839,15 +856,15 @@ async function send() {
 
       }
     }
-    await refresh();
+    if (ownsView()) await refresh();
   } catch (e) {
-    if (ctrl.signal.aborted) return;
-    updateProgress("Falha na execu\u00e7\u00e3o");
+    if (ctrl.signal.aborted || !ownsView()) return;
+    updateProgress("Falha na execução");
     addProgressEvent(e.message);
     message("system", e.message);
   } finally {
     if (runAbort === ctrl) runAbort = null;
-    if (ctrl.signal.aborted) return;
+    if (ctrl.signal.aborted || !ownsView()) return;
     endProgress();
     await refresh().catch(() => {});
     setRunning(false);
