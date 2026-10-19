@@ -131,7 +131,7 @@ function mergeSessions(stored, incoming) {
     const found = new Map();
     for (const msg of [...(previous.messages || []), ...(current.messages || [])]) {
       if (isNoisyAgentCrashMessage(msg)) continue;
-      const key = JSON.stringify([msg.role, msg.text, msg.at, msg.costUsd]);
+      const key = msg.role === "assistant" && msg.at ? JSON.stringify([msg.role, msg.at]) : JSON.stringify([msg.role, msg.text, msg.at, msg.costUsd]);
       found.set(key,msg);
     }
     const messages = [...found.values()].sort((a,b) => String(a.at || "").localeCompare(String(b.at || "")));

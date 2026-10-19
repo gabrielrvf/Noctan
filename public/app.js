@@ -800,7 +800,7 @@ async function send() {
   const ownsView = () => Boolean(streamSessionId && state.current === streamSessionId);
   let response = null;
   let assistant = null;
-  let assistantSegmentSeen = assistantSegmentEpoch;
+  let assistantSegmentSeen = assistantSegmentEpoch - 1;
   const ctrl = new AbortController();
   runAbort = ctrl;
   try {
