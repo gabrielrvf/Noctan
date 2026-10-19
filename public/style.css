@@ -443,11 +443,30 @@ h1 {
   overflow-wrap: anywhere;
 }
 .composer {
+  position: relative;
   width: min(780px, calc(100% - 44px));
   margin: 0 auto;
   padding: 12px 0 18px;
   background: transparent;
 }
+.slashMenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% - 4px);
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  background: #1b1b1b;
+  box-shadow: 0 14px 36px #0009;
+  z-index: 30;
+}
+.slashMenu button { width: 100%; display: grid; grid-template-columns: minmax(130px,auto) 1fr; gap: 12px; text-align: left; padding: 9px 11px; border: 0; border-radius: 8px; background: transparent; color: #eee; }
+.slashMenu button:hover,.slashMenu button.selected { background: #2a2a2a; }
+.slashMenu strong { color: #e0b84f; font-family: ui-monospace,Consolas,monospace; }
+.slashMenu span { color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer.dragging {
   outline: 2px dashed #d6a93b;
   outline-offset: 6px;

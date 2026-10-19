@@ -343,6 +343,7 @@ function sessionView(s) {
     pendingPrompt: s.pendingPrompt || null,
     inFlight: s.inFlight || null,
     liveActive: active.has(s.id),
+    slashCommands: Array.isArray(s.slashCommands) ? s.slashCommands : [],
   };
 }
 function send(res, type, data) {
@@ -628,6 +629,18 @@ async function runAgent(req, res) {
       let missingSessionResult = null;
       let terminatedToolSession = false;
       const q = query({ prompt: effectivePrompt, options: opts });
+      if (typeof q.supportedCommands === "function") {
+        try {
+          const commands = await q.supportedCommands();
+          s.slashCommands = commands.map((command) => ({
+            name: String(command.name || command.command || "").replace(/^\//, ""),
+            description: String(command.description || ""),
+          })).filter((command) => command.name);
+          sessions[id] = s;
+          await saveJson(SESSIONS, sessions);
+          send(res, "commands", { commands: s.slashCommands });
+        } catch {}
+      }
       const runningEntry = active.get(id);
       if (runningEntry) {
         runningEntry.query = q;
@@ -679,10 +692,18 @@ async function runAgent(req, res) {
         if (m.is_error && m.result)
           send(res, "notice", { text: String(m.result).slice(0, 3000) });
       } else if (m.type === "system" && m.subtype === "init")
+        {
+        if (Array.isArray(m.slash_commands)) {
+          s.slashCommands = m.slash_commands.map((name) => ({ name: String(name).replace(/^\//, ""), description: "" }));
+          sessions[id] = s;
+          await saveJson(SESSIONS, sessions);
+        }
         send(res, "init", {
           tools: m.tools || [],
           mcpServers: m.mcp_servers || [],
+          commands: s.slashCommands || [],
         });
+        }
       }
       } catch (error) {
         if (opts.resume && !retriedMissingSession && !finalText.trim() && isMissingClaudeSessionError(error)) missingSessionResult = error;

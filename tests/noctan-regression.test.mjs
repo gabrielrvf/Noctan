@@ -46,6 +46,14 @@ test("terminated PC Controller tool sessions reconnect without duplicating the u
   assert.match(server,/tente novamente somente a chamada de ferramenta que falhou/);
   assert.match(server,/Não repita a mensagem do usuário/);
 });
+
+test("Claude slash commands are discovered, persisted and exposed to the clients",()=>{
+  assert.match(server,/supportedCommands/);
+  assert.match(server,/slashCommands/);
+  assert.match(server,/send\(res, "commands"/);
+  assert.match(js,/slashMenu/);
+  assert.match(js,/renderSlashMenu/);
+});
 test("README presents Noctan logo and product name",()=>{
  const docs=read("README.md");
  assert.match(docs,/public\/noctan-mark\.png/);

@@ -10,6 +10,13 @@ let state = {
   provider: "anthropic",
   editReplayIndex: null,
   resumeInterrupted: false,
+  slashCommands: [
+    { name: "compact", description: "Compactar o contexto desta conversa" },
+    { name: "context", description: "Ver o uso do contexto" },
+    { name: "cost", description: "Ver o custo da sessão" },
+    { name: "init", description: "Criar instruções do projeto" },
+    { name: "review", description: "Revisar alterações" },
+  ],
 };
 let sentPrompts = [];
 let promptHistoryIndex = -1;
@@ -17,6 +24,44 @@ let promptDraft = "";
 function resetPromptNavigation() {
   promptHistoryIndex = -1;
   promptDraft = "";
+}
+let slashSelection = 0;
+function setSlashCommands(commands) {
+  if (!Array.isArray(commands) || !commands.length) return;
+  const unique = new Map();
+  for (const item of commands) {
+    const command = typeof item === "string" ? { name: item, description: "" } : item;
+    const name = String(command.name || "").replace(/^\//, "").trim();
+    if (name) unique.set(name, { name, description: String(command.description || "") });
+  }
+  if (unique.size) state.slashCommands = [...unique.values()].sort((a,b) => a.name.localeCompare(b.name));
+}
+function slashMatches() {
+  const value = $("prompt").value;
+  if (!value.startsWith("/") || /\s/.test(value)) return [];
+  const query = value.slice(1).toLowerCase();
+  return state.slashCommands.filter(command => command.name.toLowerCase().includes(query)).slice(0,12);
+}
+function chooseSlash(command) {
+  $("prompt").value = "/" + command.name + " ";
+  show($("slashMenu"), false);
+  $("prompt").focus();
+}
+function renderSlashMenu() {
+  const matches = slashMatches();
+  const menu = $("slashMenu");
+  if (!matches.length) { show(menu, false); return; }
+  slashSelection = Math.min(slashSelection, matches.length - 1);
+  menu.replaceChildren();
+  matches.forEach((command,index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.classList.toggle("selected", index === slashSelection);
+    button.innerHTML = `<strong>/${escapeHtml(command.name)}</strong><span>${escapeHtml(command.description || "Comando do Claude")}</span>`;
+    button.onmousedown = event => { event.preventDefault(); chooseSlash(command); };
+    menu.append(button);
+  });
+  show(menu, true);
 }
 function sessionPrompts(session) {
   return (session?.messages || []).filter(m => m.role === "user" && m.text)
@@ -376,6 +421,7 @@ async function loadSession(id) {
   if (state.running) return;
   state.current = id;
   const s = await request("/api/sessions/" + id);
+  setSlashCommands(s.slashCommands);
   state.provider = "anthropic";
   updateProviderUI();
   setPromptHistory(s);
@@ -672,10 +718,13 @@ async function send() {
           addProgressEvent(JSON.stringify(data.input || {}).slice(0,600));
         }
         if (type === "init") {
+          setSlashCommands(data.commands);
+          renderSlashMenu();
           keepProgressLast();
           updateProgress("Agente inicializado");
           addProgressEvent("Ferramentas dispon\u00edveis: "+(data.tools || []).length);
         }
+        if (type === "commands") { setSlashCommands(data.commands); renderSlashMenu(); }
         if (type === "approval") updateProgress("Aguardando autoriza\u00e7\u00e3o");
         if (type === "approval") approval(data);
         if (type === "result") {
@@ -1492,6 +1541,15 @@ $("dictate").onclick = () => {
   else startRecording();
 };
 $("prompt").onkeydown = (e) => {
+  const slash = slashMatches();
+  if (slash.length && ["ArrowUp","ArrowDown","Tab","Enter"].includes(e.key)) {
+    if (e.key === "ArrowUp") slashSelection = (slashSelection - 1 + slash.length) % slash.length;
+    else if (e.key === "ArrowDown") slashSelection = (slashSelection + 1) % slash.length;
+    else chooseSlash(slash[slashSelection]);
+    e.preventDefault();
+    renderSlashMenu();
+    return;
+  }
   if (e.key === "ArrowUp" && !e.shiftKey && !e.ctrlKey && !e.metaKey && ($("prompt").selectionStart === 0 || !$("prompt").value)) {
     if (promptHistoryIndex === -1) promptDraft = $("prompt").value;
     if (sentPrompts.length) {
@@ -1512,6 +1570,7 @@ $("prompt").onkeydown = (e) => {
     send();
   }
 };
+$("prompt").addEventListener("input", () => { slashSelection = 0; renderSlashMenu(); });
 $("cancel").onclick = async () => {
   if (state.current)
     await request("/api/cancel", {
