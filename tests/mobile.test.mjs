@@ -43,8 +43,8 @@ test('mobile can pull to refresh and recover a changed PC connection', () => {
   assert.match(html, /touchmove/);
   assert.match(html, /touchend/);
   assert.match(html, /tryDefaultConnection/);
-  assert.match(html, /PC não encontrado/);
-  assert.doesNotMatch(html, /endereÃ/);
+  assert.match(html, /PC nÃ£o encontrado/);
+  assert.doesNotMatch(html, /endereÃƒ/);
 });
 
 test('mobile exposes the Claude slash command picker', () => {
@@ -52,3 +52,4 @@ test('mobile exposes the Claude slash command picker', () => {
   assert.match(html, /renderSlashMenu/);
   assert.match(html, /slashCommands/);
 });
+

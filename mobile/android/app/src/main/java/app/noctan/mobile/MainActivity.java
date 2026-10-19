@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/1.0.31");
+        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/1.0.32");
 
         webView.addJavascriptInterface(new NativeBridge(), "NoctanNative");
         webView.setWebViewClient(new WebViewClient());
