@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/0.1");
+        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/1.0.30");
 
         webView.addJavascriptInterface(new NativeBridge(), "NoctanNative");
         webView.setWebViewClient(new WebViewClient());
@@ -169,7 +169,12 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+        if (webView == null) { super.onBackPressed(); return; }
+        webView.evaluateJavascript("(window.NoctanHandleBack&&window.NoctanHandleBack())?true:false", value -> {
+            if (!"true".equals(value)) {
+                if (webView.canGoBack()) webView.goBack();
+                else MainActivity.super.onBackPressed();
+            }
+        });
     }
 }
