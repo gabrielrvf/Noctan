@@ -1,5 +1,5 @@
 import http from "node:http";
-import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
 import { homedir, platform } from "node:os";
@@ -401,7 +401,7 @@ async function runAgent(req, res) {
     });
   if (!config.workspace || !existsSync(config.workspace))
     return json(res, 409, {
-      error: "Configure um workspace existente em ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes.",
+      error: "Configure um workspace existente em Configurações.",
     });
   const originalPrompt = String(body.prompt || "").trim(),
     attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
@@ -836,16 +836,31 @@ async function staticFile(res, path) {
 }
 async function migrateLegacyData() {
   const legacyPaths = [
+    ...(process.env.APPDATA ? [join(process.env.APPDATA, "Noctan")] : []),
     ...(process.env.APPDATA ? [join(process.env.APPDATA, "Claude X", "data")] : []),
     join(BASE, "data"),
   ].filter(p => resolve(p) !== resolve(DATA));
-  if (!existsSync(CONFIG)) {
+  let currentConfig = await loadJson(CONFIG, null);
+  for (const oldDir of legacyPaths) {
+    const oldConfig = await loadJson(join(oldDir, "config.json"), null);
+    if (!oldConfig || typeof oldConfig.workspace !== "string") continue;
+    if (!currentConfig) currentConfig = oldConfig;
+    else {
+      if (!currentConfig.workspace && oldConfig.workspace) currentConfig.workspace = oldConfig.workspace;
+      if (!currentConfig.vault && oldConfig.vault) currentConfig.vault = oldConfig.vault;
+      if (!currentConfig.pcControllerPath && oldConfig.pcControllerPath) currentConfig.pcControllerPath = oldConfig.pcControllerPath;
+    }
+    await saveJson(CONFIG, currentConfig);
+    if (currentConfig.workspace) break;
+  }
+  for (const name of ["anthropic-key.dpapi", "openai-key.dpapi", "tunnel-runtime-key.dpapi", "mobile-token.dpapi"]) {
+    const target = join(DATA, name);
+    if (existsSync(target)) continue;
     for (const oldDir of legacyPaths) {
-      const oldConfig = await loadJson(join(oldDir, "config.json"), null);
-      if (oldConfig && typeof oldConfig.workspace === "string") {
-        await saveJson(CONFIG, oldConfig);
-        break;
-      }
+      const source = join(oldDir, name);
+      if (!existsSync(source)) continue;
+      await copyFile(source, target);
+      break;
     }
   }
   const all = await loadJson(SESSIONS, {});

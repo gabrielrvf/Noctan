@@ -293,8 +293,8 @@ function updateTunnelUI() {
   const tunnelConnected = tunnelState === "connected";
   const localConnected = Boolean(pc.localConnected);
   const busy = ["connecting", "stopping"].includes(tunnelState) || ["connecting", "stopping"].includes(localState);
-  const connected = tunnelConnected && localConnected;
-  const failed = !busy && (!tunnelConnected || !localConnected);
+  const connected = localConnected || tunnelConnected;
+  const failed = !busy && !connected;
   $("pcControllerDot").className = busy ? "connecting" : connected ? "connected" : failed ? "error" : "";
   $("pcControllerBtn").classList.toggle("connected", connected);
   $("pcControllerBtn").title = connected

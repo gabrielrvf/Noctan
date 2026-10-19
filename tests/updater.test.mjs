@@ -47,3 +47,16 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Publish desktop and Android atomically'));
   assert.match(workflow, /GITHUB_TOKEN/);
 });
+
+test('legacy configuration migration preserves workspace and protected keys', () => {
+  const server = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /join\(process\.env\.APPDATA, "Noctan"\)/);
+  assert.match(server, /if \(!currentConfig\.workspace && oldConfig\.workspace\)/);
+  assert.match(server, /"anthropic-key\.dpapi"/);
+  assert.match(server, /copyFile\(source, target\)/);
+});
+
+test('PC Controller is green when either local controller or tunnel is connected', () => {
+  assert.match(app, /const connected = localConnected \|\| tunnelConnected/);
+  assert.match(app, /const failed = !busy && !connected/);
+});
