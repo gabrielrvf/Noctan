@@ -1104,6 +1104,16 @@ const server = http.createServer(async (req, res) => {
       ["/", "/app.js", "/style.css", "/noctan-mark.png"].includes(path)
     )
       return await staticFile(res, path);
+    if (req.method === "GET" && path.startsWith("/api/attachments/")) {
+      const name = decodeURIComponent(path.slice("/api/attachments/".length));
+      if (!/^[A-Za-z0-9._-]+$/.test(name)) return json(res, 400, { error: "Anexo inválido" });
+      const file = join(ATTACHMENTS, name);
+      if (!existsSync(file)) return json(res, 404, { error: "Anexo não encontrado" });
+      const ext = name.toLowerCase().split(".").pop();
+      const type = ({png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif"})[ext] || "application/octet-stream";
+      res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff" });
+      return res.end(await readFile(file));
+    }
     if (req.method === "GET" && path === "/api/status")
       return json(res, 200, {
         discovery: await discover(),

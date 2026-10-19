@@ -1,7 +1,7 @@
 {
   "name": "noctan",
   "productName": "Noctan",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "private": true,
   "type": "module",
   "main": "desktop.mjs",

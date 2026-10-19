@@ -1120,3 +1120,7 @@ h1 {
 .agentTranscript{display:flex;flex-direction:column;gap:9px}.agentEvent{padding:10px 12px;border:1px solid #303030;background:#181818;border-radius:10px}.agentEvent.assistant{background:#1d1b20}.agentEvent.tool{background:#171a1d}.agentEvent small{display:block;color:#858585;font-size:9px;margin-bottom:5px}.agentEvent>div{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
 .agentsEmpty{color:#777;font-size:12px;padding:16px}
 @media(max-width:900px){.agentsPanel{width:94vw}.agentsBody{grid-template-columns:190px 1fr}}
+
+.messageAttachmentGallery{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.messageAttachmentGallery img{width:92px;height:92px;object-fit:cover;border-radius:9px;border:1px solid #444;cursor:zoom-in;background:#111}
+.messageAttachmentGallery img:hover{border-color:#767676}

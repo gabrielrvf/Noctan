@@ -191,7 +191,7 @@ function renderMarkdown(element, text) {
   closeList();
   element.innerHTML = html;
 }
-function message(role, text, attachmentCount = 0, messageIndex = null) {
+function message(role, text, attachments = [], messageIndex = null) {
   text = repairDisplayText(text);
   const e = document.createElement("div");
   e.className = "message " + role;
@@ -212,11 +212,23 @@ function message(role, text, attachmentCount = 0, messageIndex = null) {
       edit.onclick = (event) => { event.stopPropagation(); editUserMessage(messageIndex, text); };
       e.append(edit);
     }
-    if (attachmentCount > 0) {
-      const summary = document.createElement("div");
-      summary.className = "messageAttachments";
-      summary.textContent = attachmentCount + (attachmentCount === 1 ? " imagem anexada" : " imagens anexadas");
-      e.append(summary);
+    const messageAttachments = Array.isArray(attachments) ? attachments : [];
+    if (messageAttachments.length) {
+      const gallery = document.createElement("div");
+      gallery.className = "messageAttachmentGallery";
+      for (const item of messageAttachments) {
+        const name = typeof item === "string" ? item : String(item?.name || "");
+        const src = typeof item === "string" ? "/api/attachments/" + encodeURIComponent(item) : String(item?.dataUrl || item?.src || "");
+        if (!src) continue;
+        const image = document.createElement("img");
+        image.src = src;
+        image.alt = name || "Imagem enviada";
+        image.title = "Clique para visualizar";
+        image.loading = "lazy";
+        image.onclick = () => openAttachmentPreview({ name, dataUrl: src });
+        gallery.append(image);
+      }
+      e.append(gallery);
     }
   }
   $("chat").append(e);
@@ -541,7 +553,7 @@ async function loadSession(id) {
   let cost = 0;
   for (const [index, m] of s.messages.entries()) {
     const syntheticResume = m.role === "user" && /^Retomar execu(?:ção|..o) interrompida$/i.test(String(m.text || "").trim());
-    if (!syntheticResume) message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, index);
+    if (!syntheticResume) message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments : [], index);
     cost += m.costUsd || 0;
   }
   state.renderedMessageCount = Array.isArray(s.messages) ? s.messages.length : 0;
@@ -565,7 +577,7 @@ async function loadSession(id) {
       if (r?.messages && r.messages.length > renderedCount) {
         for (let i = renderedCount; i < r.messages.length; i += 1) {
           const m = r.messages[i];
-          message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments.length : 0, i);
+          message(m.role, m.text, Array.isArray(m.attachments) ? m.attachments : [], i);
         }
         state.renderedMessageCount = r.messages.length;
         state.renderedCounts.set(id, r.messages.length);
@@ -836,7 +848,9 @@ async function send() {
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
     resetPromptNavigation();
     $("prompt").value = "";
-    message("user", prompt || "Imagem anexada", attachments.length);
+    message("user", prompt || "Imagem anexada", attachments);
+    state.attachments = [];
+    renderAttachments();
     assistantSegmentEpoch += 1;
     keepProgressLast();
     try {
@@ -844,8 +858,6 @@ async function send() {
         method: "POST",
         body: JSON.stringify({ sessionId: targetSessionId, prompt, attachments }),
       });
-      state.attachments = [];
-      renderAttachments();
       addProgressEvent(attachments.length ? "Nova mensagem com imagem enviada ao agente durante a execução." : "Nova mensagem enviada ao agente durante a execução.");
     } catch (error) {
       message("system", error.message);
@@ -863,7 +875,7 @@ async function send() {
     $("chat").replaceChildren();
     $("conversationTitle").textContent = (prompt || "Imagem anexada").slice(0, 65);
   }
-  if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments.length);
+  if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments);
   setRunning(true);
   const targetMeta = ensureLiveRunMeta(targetSessionId);
   if (targetMeta) { targetMeta.startedAt = Date.now(); targetMeta.events = []; targetMeta.realStatus = ""; targetMeta.active = true; }
