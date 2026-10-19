@@ -108,6 +108,21 @@ function normalizeChromeCommand(value) {
   return prompt;
 }
 
+function isNoisyAgentCrashMessage(message) {
+  const text = String(message?.text || "");
+  return message?.role === "system" && (
+    /Claude Code process exited with code 3/.test(text) ||
+    /Bun has crashed/.test(text) ||
+    /Segmentation fault at address/.test(text)
+  );
+}
+function shortAgentError(error) {
+  const raw = String(error?.message || error || "");
+  if (/Claude Code process exited with code 3|Bun has crashed|Segmentation fault at address/.test(raw)) {
+    return "O processo do agente caiu inesperadamente. O Noctan preservou a conversa e pode continuar sem exibir o dump técnico.";
+  }
+  return raw.slice(0, 1000);
+}
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
@@ -115,6 +130,7 @@ function mergeSessions(stored, incoming) {
     if (!previous) { merged[id] = current; continue; }
     const found = new Map();
     for (const msg of [...(previous.messages || []), ...(current.messages || [])]) {
+      if (isNoisyAgentCrashMessage(msg)) continue;
       const key = JSON.stringify([msg.role, msg.text, msg.at, msg.costUsd]);
       found.set(key,msg);
     }
@@ -349,7 +365,7 @@ function sessionView(s) {
     title: s.title,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
-    messages: s.messages,
+    messages: (s.messages || []).filter((message) => !isNoisyAgentCrashMessage(message)),
     provider: s.provider || "anthropic",
     claudeSessionId: s.claudeSessionId || null,
     openaiResponseId: s.openaiResponseId || null,
@@ -761,12 +777,12 @@ async function runAgent(req, res) {
     await saveJson(SESSIONS, sessions);
     send(res, "done", { sessionId: id });
   } catch (e) {
-    const msg = String(e?.message || e);
-    send(res, "error", { error: msg.slice(0, 3000) });
+    const msg = shortAgentError(e);
+    send(res, "error", { error: msg });
     if(finalText.trim()) await persistAssistant();
     s.messages.push({
       role: "system",
-      text: "Erro: " + msg.slice(0, 2000),
+      text: "Erro: " + msg,
       at: new Date().toISOString(),
     });
     delete s.inFlight;

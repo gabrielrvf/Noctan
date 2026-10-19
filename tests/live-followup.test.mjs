@@ -108,3 +108,9 @@ test("brand-new chats attach live metadata after receiving their session id", ()
   assert.match(app, /if \(!state\.liveRuns\.has\(streamSessionId\)\)/);
   assert.match(app, /startedAt: progressStarted \|\| Date\.now\(\)/);
 });
+
+test("follow-up text always starts a new assistant bubble after the user message", () => {
+  assert.match(app, /const segmentChanged = assistantSegmentSeen !== assistantSegmentEpoch/);
+  assert.match(app, /const existing = segmentChanged \? null :/);
+  assert.match(app, /assistant = existing || message("assistant", "")/);
+});

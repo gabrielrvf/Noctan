@@ -876,12 +876,13 @@ async function send() {
           recordLiveRunEvent(streamSessionId, "Respondendo");
           if (!ownsView()) continue;
           updateProgress("Respondendo");
-          if (assistantSegmentSeen !== assistantSegmentEpoch) {
+          const segmentChanged = assistantSegmentSeen !== assistantSegmentEpoch;
+          if (segmentChanged) {
             assistant = null;
             assistantSegmentSeen = assistantSegmentEpoch;
           }
           if (!assistant || !assistant.isConnected) {
-            const existing = [...document.querySelectorAll(".message.assistant")].at(-1);
+            const existing = segmentChanged ? null : [...document.querySelectorAll(".message.assistant")].at(-1);
             assistant = existing || message("assistant", "");
           }
           assistant.rawText += (assistant.rawText ? "\n" : "") + data.text;
