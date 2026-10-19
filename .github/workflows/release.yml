@@ -42,10 +42,21 @@ jobs:
           git tag "v$version" "$env:GITHUB_SHA"
           git push origin "v$version"
 
-      - name: Build and publish GitHub release
+      - name: Build desktop artifacts
+        run: npx electron-builder --win nsis --publish never
+
+      - name: Create release and upload desktop artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --publish always
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --title "Noctan v$version" --notes "Automated Noctan release."
+          }
+          gh release upload $tag "dist/Noctan-Setup-$version.exe" "dist/Noctan-Setup-$version.exe.blockmap" "dist/latest.yml" --clobber
 
   mobile:
     needs: release

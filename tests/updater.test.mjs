@@ -29,9 +29,12 @@ test('renderer exposes update button and restart-to-update flow', () => {
   assert.match(app, /window\.noctanUpdater\.installNow/);
 });
 
-test('main branch publishes incrementing GitHub releases', () => {
+test('main branch publishes incrementing GitHub releases deterministically', () => {
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);
-  assert.match(workflow, /electron-builder --win nsis --publish always/);
+  assert.match(workflow, /electron-builder --win nsis --publish never/);
+  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /gh release upload/);
+  assert.match(workflow, /latest\.yml/);
   assert.match(workflow, /GITHUB_TOKEN/);
 });
