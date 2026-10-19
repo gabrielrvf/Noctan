@@ -54,6 +54,10 @@ test("Claude slash commands are discovered, persisted and exposed to the clients
   assert.match(js,/slashMenu/);
   assert.match(js,/renderSlashMenu/);
 });
+
+test("Claude sessions start with the user's Chrome extension integration enabled",()=>{
+  assert.match(server,/extraArgs:\s*\{\s*chrome:\s*null\s*\}/);
+});
 test("README presents Noctan logo and product name",()=>{
  const docs=read("README.md");
  assert.match(docs,/public\/noctan-mark\.png/);

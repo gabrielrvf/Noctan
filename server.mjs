@@ -579,6 +579,7 @@ async function runAgent(req, res) {
       permissionMode: "default",
       includePartialMessages: false,
       pathToClaudeCodeExecutable: resolveClaudeCodeExecutable(),
+      extraArgs: { chrome: null },
     };
     if (s.claudeSessionId) opts.resume = s.claudeSessionId;
     if (config.pluginPaths.length)
