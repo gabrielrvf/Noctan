@@ -19,6 +19,8 @@ test('packaged app has GitHub auto updater configured', () => {
   assert.match(desktop, /autoUpdater\.autoInstallOnAppQuit = true/);
   assert.match(desktop, /checkForUpdates\(\)/);
   assert.match(desktop, /quitAndInstall\(false, true\)/);
+  assert.match(desktop, /requestSingleInstanceLock\(\)/);
+  assert.match(desktop, /isVersionStrictlyNewer\(info\?\.version, app\.getVersion\(\)\)/);
 });
 
 test('renderer exposes update button and restart-to-update flow', () => {
@@ -33,8 +35,14 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);
   assert.match(workflow, /electron-builder --win nsis --publish never/);
-  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /gh release create .*--draft/);
   assert.match(workflow, /gh release upload/);
+  assert.match(workflow, /gh release create/);
   assert.match(workflow, /latest\.yml/);
+  assert.match(workflow, /Noctan-Mobile\.apk/);
+  assert.match(workflow, /NOCTAN_RELEASE_VERSION/);
+  assert.doesNotMatch(workflow, /^  mobile:/m);
+  assert.match(workflow, /cancel-in-progress: true/);
+  assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Publish desktop and Android atomically'));
   assert.match(workflow, /GITHUB_TOKEN/);
 });

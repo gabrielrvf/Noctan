@@ -66,6 +66,21 @@ async function loadJson(path, fallback) {
     return fallback;
   }
 }
+async function replaceWithRetry(tmp, path) {
+  const fs = await import("node:fs/promises");
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(tmp, path);
+      return;
+    } catch (error) {
+      if (!["EPERM", "EBUSY", "EACCES"].includes(error?.code) || attempt >= 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+    }
+  }
+}
+function isMissingClaudeSessionError(value) {
+  return /No conversation found with session ID:/i.test(String(value?.message || value || ""));
+}
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
@@ -87,7 +102,7 @@ async function saveJson(path,obj) {
   if (path !== SESSIONS) {
     const tmp=path+".tmp-"+randomUUID();
     await writeFile(tmp, JSON.stringify(obj,null,2), {mode:0o600});
-    await import("node:fs/promises").then(fs=>fs.rename(tmp,path));
+    await replaceWithRetry(tmp,path);
     return;
   }
   const lock=SESSIONS+".lock";
@@ -104,7 +119,7 @@ async function saveJson(path,obj) {
     const merged=mergeSessions(onDisk,obj);
     const tmp=SESSIONS+".tmp-"+randomUUID();
     await writeFile(tmp,JSON.stringify(merged,null,2),{mode:0o600});
-    await import("node:fs/promises").then(fs=>fs.rename(tmp,SESSIONS));
+    await replaceWithRetry(tmp,SESSIONS);
     sessions=merged;
   } finally {
     if(taken)await import("node:fs/promises").then(fs=>fs.rm(lock,{recursive:true,force:true}));
@@ -441,10 +456,9 @@ async function runAgent(req, res) {
     typeof m?.text === "string" && m.text.includes("an image in the conversation could not be processed")
   );
   if (malformedImageSession) delete s.claudeSessionId;
-  const historyForRebuild = !s.claudeSessionId
-    ? (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])])
-        .filter((m) => !(typeof m?.text === "string" && m.text.includes("an image in the conversation could not be processed")))
-    : [];
+  const historyBeforeCurrent = (replayingEdit ? s.messages.slice(0, editReplayIndex) : [...(s.messages || [])])
+    .filter((m) => !(typeof m?.text === "string" && (m.text.includes("an image in the conversation could not be processed") || isMissingClaudeSessionError(m.text))));
+  const historyForRebuild = !s.claudeSessionId ? historyBeforeCurrent : [];
   if (!replayingEdit && !resumeInterrupted) s.messages.push({
     role: "user",
     text: originalPrompt || "Imagem anexada",
@@ -608,16 +622,20 @@ async function runAgent(req, res) {
         .join("\n\n");
       effectivePrompt = "Contexto reconstruÃƒÂ­do da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
     }
-    const q = query({ prompt: effectivePrompt, options: opts });
-    const runningEntry = active.get(id);
-    if (runningEntry) {
-      runningEntry.query = q;
-      for (const queued of runningEntry.pendingInputs.splice(0)) {
-        async function* oneQueued() { yield queued; }
-        await q.streamInput(oneQueued());
+    let retriedMissingSession = false;
+    for (;;) {
+      let missingSessionResult = null;
+      const q = query({ prompt: effectivePrompt, options: opts });
+      const runningEntry = active.get(id);
+      if (runningEntry) {
+        runningEntry.query = q;
+        for (const queued of runningEntry.pendingInputs.splice(0)) {
+          async function* oneQueued() { yield queued; }
+          await q.streamInput(oneQueued());
+        }
       }
-    }
-    for await (const m of q) {
+      try {
+      for await (const m of q) {
       if (m.session_id) {
         s.claudeSessionId = m.session_id;
         if (s.inFlight) s.inFlight.lastCheckpointAt = new Date().toISOString();
@@ -640,6 +658,10 @@ async function runAgent(req, res) {
             send(res, "tool", { name: b.name, input: redact(b.input) });
         }
       } else if (m.type === "result") {
+        if (m.is_error && opts.resume && !retriedMissingSession && !finalText.trim() && isMissingClaudeSessionError(m.result)) {
+          missingSessionResult = m.result;
+          continue;
+        }
         spent = Number(m.total_cost_usd || 0);
         send(res, "result", {
           subtype: m.subtype,
@@ -654,6 +676,24 @@ async function runAgent(req, res) {
           tools: m.tools || [],
           mcpServers: m.mcp_servers || [],
         });
+      }
+      } catch (error) {
+        if (opts.resume && !retriedMissingSession && !finalText.trim() && isMissingClaudeSessionError(error)) missingSessionResult = error;
+        else throw error;
+      }
+      if (!missingSessionResult) break;
+      retriedMissingSession = true;
+      delete s.claudeSessionId;
+      delete opts.resume;
+      sessions[id] = s;
+      await saveJson(SESSIONS, sessions);
+      const rebuilt = historyBeforeCurrent
+        .filter((m) => ["user", "assistant", "system"].includes(m.role) && m.text)
+        .slice(-80)
+        .map((m) => "[" + (m.role === "user" ? "Usuário" : m.role === "assistant" ? "Assistente" : "Sistema") + "] " + m.text)
+        .join("\n\n");
+      effectivePrompt = (rebuilt ? "Contexto reconstruído da conversa antes desta mensagem:\n\n" + rebuilt + "\n\n" : "") + "[Mensagem atual]\n" + (resumeInterrupted ? crashResumePrompt : prompt);
+      send(res, "notice", { text: "A sessão anterior do Claude expirou; o contexto salvo foi restaurado automaticamente." });
     }
     }
     if (finalText.trim()) {

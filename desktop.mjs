@@ -5,6 +5,23 @@ import { join } from "node:path";
 const { autoUpdater } = updaterPackage;
 const APP_PORT = Number(process.env.PORT || 4177);
 const APP_URL = `http://127.0.0.1:${APP_PORT}`;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+let mainWindow = null;
+
+function numericVersion(value) {
+  const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+export function isVersionStrictlyNewer(candidate, current) {
+  const next = numericVersion(candidate);
+  const installed = numericVersion(current);
+  if (!next || !installed) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (next[index] !== installed[index]) return next[index] > installed[index];
+  }
+  return false;
+}
 
 const updateState = {
   status: "idle",
@@ -59,6 +76,10 @@ async function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-available", (info) => {
+    if (!isVersionStrictlyNewer(info?.version, app.getVersion())) {
+      setUpdateState({ status: "current", availableVersion: info?.version || null, percent: 0, message: "Noctan está atualizado." });
+      return;
+    }
     setUpdateState({
       status: "available",
       availableVersion: info.version,
@@ -85,6 +106,10 @@ async function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-downloaded", (info) => {
+    if (!isVersionStrictlyNewer(info?.version, app.getVersion())) {
+      setUpdateState({ status: "current", availableVersion: info?.version || null, percent: 0, message: "Noctan está atualizado." });
+      return;
+    }
     setUpdateState({
       status: "downloaded",
       availableVersion: info.version,
@@ -152,6 +177,8 @@ async function createWindow(targetUrl = APP_URL) {
       webviewTag: true,
     },
   });
+  mainWindow = window;
+  window.on("closed", () => { if (mainWindow === window) mainWindow = null; });
 
   const localOrigin = new URL(APP_URL).origin;
   const localMediaRequest = (webContents, permission, requestingOrigin, details = {}) => {
@@ -208,16 +235,25 @@ async function createWindow(targetUrl = APP_URL) {
   await window.loadURL(targetUrl);
 }
 
-app
-  .whenReady()
-  .then(async () => {
-    app.setAppUserModelId("app.noctan.desktop");
-    await setupAutoUpdater();
-    return createWindow();
-  })
-  .catch((error) => {
-    console.error(error);
-    app.quit();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
   });
+  app
+    .whenReady()
+    .then(async () => {
+      app.setAppUserModelId("app.noctan.desktop");
+      await setupAutoUpdater();
+      return createWindow();
+    })
+    .catch((error) => {
+      console.error(error);
+      app.quit();
+    });
+}
 
 app.on("window-all-closed", () => app.quit());

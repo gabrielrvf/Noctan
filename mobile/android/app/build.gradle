@@ -10,13 +10,15 @@ android {
     def esc = { String v -> (v ?: '').replace('\\','\\\\').replace('\"','\\\"') }
     def mobileBase = esc(System.getenv('NOCTAN_MOBILE_BASE'))
     def mobileToken = esc(System.getenv('NOCTAN_MOBILE_TOKEN'))
+    def releaseVersion = System.getenv('NOCTAN_RELEASE_VERSION') ?: '0.1.0'
+    def releaseCode = (System.getenv('NOCTAN_RELEASE_CODE') ?: '1') as Integer
 
     defaultConfig {
         applicationId 'app.noctan.mobile'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '0.1.0'
+        versionCode releaseCode
+        versionName releaseVersion
         buildConfigField 'String', 'MOBILE_DEFAULT_BASE', '"' + mobileBase + '"'
         buildConfigField 'String', 'MOBILE_DEFAULT_TOKEN', '"' + mobileToken + '"'
     }
