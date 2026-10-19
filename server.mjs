@@ -73,8 +73,29 @@ async function replaceWithRetry(tmp, path) {
       await fs.rename(tmp, path);
       return;
     } catch (error) {
-      if (!["EPERM", "EBUSY", "EACCES"].includes(error?.code) || attempt >= 7) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+      if (!["EPERM", "EBUSY", "EACCES"].includes(error?.code)) throw error;
+      if (attempt >= 20) {
+        // Windows: antivírus/indexador ou o processo antigo da atualização seguram o destino; sobrescrever ainda funciona.
+        await fs.copyFile(tmp, path);
+        await fs.rm(tmp, { force: true });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * Math.min(attempt + 1, 6)));
+    }
+  }
+}
+async function takeSessionsLock() {
+  const fs = await import("node:fs/promises");
+  const lock = SESSIONS + ".lock";
+  for (let i = 0; i < 150; i++) {
+    try { await mkdir(lock); return lock; }
+    catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      // Lock de um processo morto (ex.: fechado pela atualização) não pode travar as conversas para sempre.
+      const age = await fs.stat(lock).then((st) => Date.now() - st.mtimeMs, () => 0);
+      if (age > 30000) { await fs.rm(lock, { recursive: true, force: true }); continue; }
+      if (i === 149) throw Error("Conversas ocupadas: tente novamente.");
+      await new Promise(done => setTimeout(done, 50));
     }
   }
 }
@@ -115,15 +136,8 @@ async function saveJson(path,obj) {
     await replaceWithRetry(tmp,path);
     return;
   }
-  const lock=SESSIONS+".lock";
-  let taken=false;
-  for(let i=0;i<150;i++){
-    try {await mkdir(lock);taken=true;break;}
-    catch(e){ if(e.code!=="EEXIST")throw e;
-      if(i===149)throw Error("Conversas ocupadas: tente novamente.");
-      await new Promise(done=>setTimeout(done,50));
-    }
-  }
+  const lock=await takeSessionsLock();
+  const taken=true;
   try {
     const onDisk=await loadJson(SESSIONS,{});
     const merged=mergeSessions(onDisk,obj);
@@ -139,16 +153,8 @@ async function saveJson(path,obj) {
 async function deleteSessionById(id) {
   if (!id || active.has(id)) throw Error("NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel apagar uma conversa em execuÃƒÂ§ÃƒÂ£o.");
   await mkdir(dirname(SESSIONS), { recursive: true });
-  const lock = SESSIONS + ".lock";
-  let taken = false;
-  for (let i = 0; i < 150; i++) {
-    try { await mkdir(lock); taken = true; break; }
-    catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      if (i === 149) throw Error("Conversas ocupadas: tente novamente.");
-      await new Promise(done => setTimeout(done, 50));
-    }
-  }
+  const lock = await takeSessionsLock();
+  const taken = true;
   try {
     const onDisk = await loadJson(SESSIONS, {});
     if (!onDisk[id] && !sessions[id]) return false;
@@ -156,7 +162,7 @@ async function deleteSessionById(id) {
     delete sessions[id];
     const tmp = SESSIONS + ".tmp-" + randomUUID();
     await writeFile(tmp, JSON.stringify(onDisk, null, 2), { mode: 0o600 });
-    await import("node:fs/promises").then(fs => fs.rename(tmp, SESSIONS));
+    await replaceWithRetry(tmp, SESSIONS);
     sessions = onDisk;
     return true;
   } finally {

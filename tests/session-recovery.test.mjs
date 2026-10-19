@@ -17,4 +17,11 @@ test("session writes use unique temporary files and retry transient Windows lock
   assert.match(server, /\.tmp-"\+randomUUID\(\)/);
   assert.match(server, /replaceWithRetry/);
   assert.match(server, /"EPERM", "EBUSY", "EACCES"/);
+  assert.match(server, /fs\.copyFile\(tmp, path\)/);
+  assert.doesNotMatch(server, /fs\.rename\(tmp, SESSIONS\)/);
+});
+
+test("a lock left by a killed process (app update) is reclaimed", () => {
+  assert.match(server, /takeSessionsLock/);
+  assert.match(server, /age > 30000/);
 });
