@@ -99,7 +99,74 @@ function renderPending(){$("attachmentTray").replaceChildren();state.pending.for
 function approvalCard(data){const d=document.createElement("div");d.className="approval";d.innerHTML="<b>Permissão solicitada: "+escapeHtml(data.tool)+"</b><pre>"+escapeHtml(JSON.stringify(data.input,null,2))+"</pre><div class=actions></div>";for(const [label,allow,all,bypass] of [["Permitir",true,false,false],["Permitir tudo",true,true,false],["Bypass all permissions",true,true,true],["Negar",false,false,false]]){const b=document.createElement("button");b.textContent=label;if(all)b.className="allowAll";b.onclick=async()=>{await api("/api/approve",{method:"POST",body:JSON.stringify({id:data.id,allow,allowAll:all,bypassAll:bypass})});d.remove()};d.querySelector(".actions").append(b)}$("chat").append(d);$("chat").scrollTop=$("chat").scrollHeight}
 function progress(text){if(!state.progress||!state.progress.isConnected){state.progress=document.createElement("div");state.progress.className="progress";$("chat").append(state.progress)}state.progress.textContent=text;$("runStatus").textContent=text;$("chat").scrollTop=$("chat").scrollHeight}
 function parsePacket(packet){let event="",data="";for(const raw of packet.split(String.fromCharCode(10))){const line=raw.trim();if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim()}if(!event)return;let obj={};try{obj=JSON.parse(data||"{}")}catch{}if(event==="agent"){upsertAgent(obj.agent);return}if(event==="start"){state.current=obj.sessionId;state.streaming=true;$("stopBtn").classList.remove("hidden");progress("Agente em execução")}else if(event==="commands"||event==="init"){setSlashCommands(obj.commands);renderSlashMenu()}else if(event==="text"){if(!state.assistant)state.assistant=addMsg("assistant","");state.assistant.rawText+=(state.assistant.rawText?String.fromCharCode(10):"")+String(obj.text||"");renderMarkdown(state.assistant,state.assistant.rawText);$("chat").scrollTop=$("chat").scrollHeight}else if(event==="tool")progress("Usando ferramenta: "+obj.name);else if(event==="approval"){approvalCard(obj);progress("Aguardando autorização")}else if(event==="notice")progress(obj.text||"Atualização");else if(event==="error")addMsg("system","Erro: "+(obj.error||"desconhecido"));else if(event==="done"){state.streaming=false;$("stopBtn").classList.add("hidden");state.progress?.remove();state.progress=null;state.assistant=null;$("runStatus").textContent="Aguardando mensagem";loadSessions(true).catch(()=>{})}}
-async function streamRun(body){state.streaming=true;state.assistant=null;progress("Iniciando…");try{const res=await fetch(state.base+"/api/run",{method:"POST",headers:authHeaders({"content-type":"application/json"}),body:JSON.stringify(body)});if(!res.ok){const j=await res.json().catch(()=>({}));throw Error(j.error||"Falha ao iniciar")}const reader=res.body.getReader(),dec=new TextDecoder();let buf="";const sep=String.fromCharCode(10)+String.fromCharCode(10);while(true){const part=await reader.read();if(part.done)break;buf+=dec.decode(part.value,{stream:true});let i;while((i=buf.indexOf(sep))>=0){parsePacket(buf.slice(0,i));buf=buf.slice(i+sep.length)}}}finally{state.streaming=false;state.assistant=null;$("stopBtn").classList.add("hidden");if(state.current)loadSessions(true).catch(()=>{})}}async function send(){const prompt=$("prompt").value.trim(),attachments=[...state.pending];if(!prompt&&!attachments.length)return;$("prompt").value="";state.pending=[];renderPending();addMsg("user",prompt||"Arquivo anexado",attachments.map(x=>x.name));state.assistant=null;const active=!!state.session?.liveActive||state.streaming;if(active&&state.current){await api("/api/follow-up",{method:"POST",body:JSON.stringify({sessionId:state.current,prompt,attachments})});progress(attachments.length?"Follow-up com anexo enviado":"Follow-up enviado");return}await streamRun({prompt,sessionId:state.current||null,provider:"anthropic",attachments})}
+async function streamRun(body){
+  state.streaming=true;
+  state.assistant=null;
+  progress("Iniciando...");
+  try{
+    const res=await fetch(state.base+"/api/run",{
+      method:"POST",
+      headers:authHeaders({"content-type":"application/json"}),
+      body:JSON.stringify(body)
+    });
+    if(!res.ok){
+      const j=await res.json().catch(()=>({}));
+      const error=Error(j.error||("Falha ao iniciar ("+res.status+")"));
+      error.status=res.status;
+      throw error;
+    }
+    const reader=res.body.getReader(),dec=new TextDecoder();
+    let buf="";
+    while(true){
+      const part=await reader.read();
+      if(part.done)break;
+      buf+=dec.decode(part.value,{stream:true}).replace(/\r\n/g,"\n");
+      let i;
+      while((i=buf.indexOf("\n\n"))>=0){
+        parsePacket(buf.slice(0,i));
+        buf=buf.slice(i+2);
+      }
+    }
+  }finally{
+    state.streaming=false;
+    state.assistant=null;
+    $("stopBtn").classList.add("hidden");
+    if(state.current)loadSessions(true).catch(()=>{});
+  }
+}
+async function sendFollowUp(prompt,attachments){
+  await api("/api/follow-up",{
+    method:"POST",
+    body:JSON.stringify({sessionId:state.current,prompt,attachments})
+  });
+  progress(attachments.length?"Follow-up com anexo enviado":"Follow-up enviado");
+}
+async function send(){
+  const prompt=$("prompt").value.trim(),attachments=[...state.pending];
+  if(!prompt&&!attachments.length)return;
+  $("prompt").value="";
+  state.pending=[];
+  renderPending();
+  addMsg("user",prompt||"Arquivo anexado",attachments.map(x=>x.name));
+  state.assistant=null;
+
+  const summary=state.sessions.find(x=>x.id===state.current);
+  const active=state.streaming||!!summary?.liveActive||!!state.session?.liveActive;
+  if(active&&state.current){
+    await sendFollowUp(prompt,attachments);
+    return;
+  }
+
+  try{
+    await streamRun({prompt,sessionId:state.current||null,provider:"anthropic",attachments});
+  }catch(error){
+    if(error?.status===409&&state.current&&/existe execu/i.test(String(error.message||""))){
+      await sendFollowUp(prompt,attachments);
+      return;
+    }
+    throw error;
+  }
+}
 $("menuBtn").onclick=openSidebar;$("agentsBtn").onclick=openAgents;$("closeAgents").onclick=closeAgents;$("scrim").onclick=closeSidebar;$("sessionSearch").oninput=renderSessions;$("newChat").onclick=()=>{state.current=null;renderSession({id:null,messages:[]});renderSessions();closeSidebar()};
 $("sendBtn").onclick=()=>send().catch(e=>addMsg("system",e.message));$("prompt").addEventListener("input",renderSlashMenu);$("prompt").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send().catch(x=>addMsg("system",x.message))}});
 $("attachBtn").onclick=()=>$("fileInput").click();$("fileInput").onchange=e=>{addFiles(e.target.files).catch(x=>addMsg("system",x.message));e.target.value=""};$("voiceBtn").onclick=()=>{if(window.NoctanNative)window.NoctanNative.startVoice()};window.NoctanVoiceResult=text=>{const p=$("prompt");p.value=(p.value+" "+text).trim();p.focus()};window.NoctanVoiceError=msg=>addMsg("system",msg);

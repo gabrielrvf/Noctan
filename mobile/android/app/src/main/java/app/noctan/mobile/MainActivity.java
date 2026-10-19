@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/1.0.30");
+        settings.setUserAgentString(settings.getUserAgentString() + " NoctanMobile/1.0.31");
 
         webView.addJavascriptInterface(new NativeBridge(), "NoctanNative");
         webView.setWebViewClient(new WebViewClient());
@@ -107,7 +107,7 @@ public class MainActivity extends Activity {
                 try {
                     startActivityForResult(intent, VOICE_REQUEST);
                 } catch (Exception error) {
-                    sendVoiceError("Reconhecimento de voz indisponÃƒÂ­vel");
+                    sendVoiceError("Reconhecimento de voz indisponÃƒÆ’Ã‚Â­vel");
                 }
             });
         }
@@ -178,3 +178,4 @@ public class MainActivity extends Activity {
         });
     }
 }
+

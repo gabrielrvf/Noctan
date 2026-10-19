@@ -1131,12 +1131,11 @@ const server = http.createServer(async (req, res) => {
           .map(sessionView)
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       );
-    if (req.method === "GET" && path.startsWith("/api/sessions/"))
-      return json(
-        res,
-        sessions[path.split("/").pop()] ? 200 : 404,
-        sessions[path.split("/").pop()] || { error: "NÃƒÆ’Ã‚Â£o encontrada" },
-      );
+    if (req.method === "GET" && path.startsWith("/api/sessions/")) {
+      const id = path.split("/").pop();
+      const session = sessions[id];
+      return json(res, session ? 200 : 404, session ? sessionView(session) : { error: "Conversa não encontrada" });
+    }
 
     if (req.method === "DELETE" && path.startsWith("/api/sessions/")) {
       const id = path.split("/").pop();
