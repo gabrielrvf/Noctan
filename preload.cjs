@@ -10,3 +10,11 @@ contextBridge.exposeInMainWorld("noctanUpdater", {
     return () => ipcRenderer.removeListener("updater:status", handler);
   },
 });
+
+contextBridge.exposeInMainWorld("noctanDesktop", {
+  onHandoff: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("handoff:open", handler);
+    return () => ipcRenderer.removeListener("handoff:open", handler);
+  },
+});

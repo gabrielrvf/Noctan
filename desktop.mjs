@@ -148,7 +148,7 @@ async function waitForServer() {
 
 async function createWindow(targetUrl = APP_URL) {
   process.env.NOCTAN_DATA_DIR = join(app.getPath("appData"), "Noctan", "data");
-  await import("./server.mjs");
+  const serverModule = await import("./server.mjs");
   await waitForServer();
   await import("./mobile-gateway.mjs");
 
@@ -179,6 +179,14 @@ async function createWindow(targetUrl = APP_URL) {
   });
   mainWindow = window;
   window.on("closed", () => { if (mainWindow === window) mainWindow = null; });
+  serverModule.setDesktopHandoffHandler(({ sessionId }) => {
+    if (window.isDestroyed()) return false;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    window.webContents.send("handoff:open", { sessionId });
+    return true;
+  });
 
   const localOrigin = new URL(APP_URL).origin;
   const localMediaRequest = (webContents, permission, requestingOrigin, details = {}) => {

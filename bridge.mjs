@@ -4,6 +4,7 @@ import { platform } from "node:os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { normalizeExternalText } from "./external-handoff.mjs";
 
 const baseUrl = String(
   process.env.NOCTAN_URL || "http://127.0.0.1:4177",
@@ -75,16 +76,19 @@ server.registerTool(
     description:
       "Entrega uma tarefa ao Noctan local, abre a conversa na tela e mantém as aprovações de segurança no aplicativo.",
     inputSchema: {
-      prompt: z.string().min(1).max(40000).describe("Tarefa completa para o Noctan"),
-      title: z.string().max(65).optional().describe("Título curto opcional"),
+      prompt: z.unknown().describe("Tarefa completa para o Noctan"),
+      title: z.unknown().optional().describe("Título curto opcional"),
     },
   },
   async ({ prompt, title }) => {
+    prompt = normalizeExternalText(prompt);
+    title = normalizeExternalText(title);
+    if (!prompt || prompt.length > 40000) throw new Error("Tarefa vazia ou muito longa.");
     const handoff = await noctan("/api/handoff", {
       method: "POST",
       body: JSON.stringify({ prompt, title, source: "ChatGPT/Codex MCP" }),
     });
-    if (process.env.NOCTAN_NO_OPEN !== "1") openLocalUrl(handoff.url);
+    if (!handoff.openedInDesktop && process.env.NOCTAN_NO_OPEN !== "1") openLocalUrl(handoff.url);
     return {
       content: [
         {

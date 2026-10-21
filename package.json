@@ -37,6 +37,7 @@
     "files": [
       "desktop.mjs",
       "bridge.mjs",
+      "external-handoff.mjs",
       "pc-controller-manager.mjs",
       "embedded-pc-controller.mjs",
       "openai-provider.mjs",

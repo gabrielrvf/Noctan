@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
 import { homedir, platform } from "node:os";
 import { randomUUID } from "node:crypto";
+import { handoffFingerprint, normalizeExternalText } from "./external-handoff.mjs";
 import { saveApiKey, loadApiKey, removeApiKey } from "./secure-key.mjs";
 import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelStatusLive } from "./tunnel-manager.mjs";
 import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
@@ -59,6 +60,12 @@ let config = { ...defaults },
 const BOOT_ID = randomUUID();
 const bootRecoveryClaims = new Set();
 const BILLING_ERROR_PATTERN = /credit balance is too low|usage limits/i;
+let desktopHandoffHandler = null;
+const recentHandoffs = new Map();
+
+export function setDesktopHandoffHandler(handler) {
+  desktopHandoffHandler = typeof handler === "function" ? handler : null;
+}
 const json = (res, code, obj) => {
   res.writeHead(code, {
     "content-type": "application/json; charset=utf-8",
@@ -729,7 +736,7 @@ async function runAgent(req, res) {
       error: "Esta conversa pertence a outro provedor. Abra um novo chat para trocar.",
     });
   s.provider = provider;
-  delete s.pendingPrompt;
+  s.pendingPrompt = null;
   const replayingEdit = editReplayIndex !== null && s.messages?.[editReplayIndex]?.role === "user";
   const malformedImageSession = (s.messages || []).slice(-30).some((m) =>
     typeof m?.text === "string" && m.text.includes("an image in the conversation could not be processed")
@@ -1498,26 +1505,52 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && path === "/api/handoff") {
       const body = await readBody(req);
-      const prompt = String(body.prompt || "").trim();
+      const prompt = normalizeExternalText(body.prompt);
       if (!prompt || prompt.length > 40000)
         return json(res, 400, { error: "Tarefa vazia ou muito longa." });
-      const id = randomUUID();
+      const title = normalizeExternalText(body.title) || prompt;
+      const source = normalizeExternalText(body.source) || "mcp";
+      const fingerprint = handoffFingerprint({ prompt, title, source, requestId: body.requestId });
       const now = new Date().toISOString();
-      sessions[id] = {
-        id,
-        title: String(body.title || prompt).trim().slice(0, 65),
-        createdAt: now,
-        updatedAt: now,
-        messages: [],
-        pendingPrompt: prompt,
-        source: String(body.source || "mcp").slice(0, 80),
-      };
-      await saveJson(SESSIONS, sessions);
-      return json(res, 201, {
+      const recent = recentHandoffs.get(fingerprint);
+      const reusable = recent && Date.now() - recent.at < 60_000 && sessions[recent.id];
+      const id = reusable ? recent.id : randomUUID();
+      if (!reusable) {
+        sessions[id] = {
+          id,
+          title: title.slice(0, 65),
+          createdAt: now,
+          updatedAt: now,
+          messages: [],
+          pendingPrompt: prompt,
+          source: source.slice(0, 80),
+        };
+        await saveJson(SESSIONS, sessions);
+      }
+      recentHandoffs.set(fingerprint, { id, at: Date.now() });
+      for (const [key, item] of recentHandoffs) if (Date.now() - item.at > 120_000) recentHandoffs.delete(key);
+      let openedInDesktop = false;
+      try { openedInDesktop = Boolean(await desktopHandoffHandler?.({ sessionId: id })); } catch {}
+      return json(res, reusable ? 200 : 201, {
         ok: true,
         sessionId: id,
         url: `http://${HOST}:${PORT}/?session=${id}`,
+        duplicate: Boolean(reusable),
+        openedInDesktop,
       });
+    }
+    const pendingMatch = path.match(/^\/api\/sessions\/([^/]+)\/claim-pending$/);
+    if (req.method === "POST" && pendingMatch) {
+      sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+      const id = decodeURIComponent(pendingMatch[1]);
+      const session = sessions[id];
+      if (!session) return json(res, 404, { error: "Conversa não encontrada" });
+      const prompt = normalizeExternalText(session.pendingPrompt);
+      if (!prompt) return json(res, 200, { ok: true, claimed: false, prompt: null });
+      session.pendingPrompt = null;
+      session.updatedAt = new Date().toISOString();
+      await saveJson(SESSIONS, sessions);
+      return json(res, 200, { ok: true, claimed: true, prompt });
     }
     if (req.method === "PUT" && path === "/api/config") {
       config = cleanConfig(await readBody(req));

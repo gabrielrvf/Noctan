@@ -668,9 +668,12 @@ async function loadSession(id) {
     $("runStatus").textContent = "Execução interrompida — pronta para retomar";
   }
   if (s.pendingPrompt && !state.running) {
-    history.replaceState({}, "", "/");
-    $("prompt").value = s.pendingPrompt;
-    await send();
+    const claim = await request("/api/sessions/" + encodeURIComponent(id) + "/claim-pending", { method: "POST" });
+    if (claim.claimed && claim.prompt) {
+      history.replaceState({}, "", "/");
+      $("prompt").value = claim.prompt;
+      await send();
+    }
   }
 }
 function updateCost() {
@@ -2082,6 +2085,21 @@ document.querySelectorAll("[data-prompt]").forEach(
     }),
 );
 const pcHealthTimer = setInterval(() => refreshPcControllerHealth().catch(() => {}), 2000);
+window.noctanDesktop?.onHandoff?.(async ({ sessionId } = {}) => {
+  if (!sessionId) return;
+  await refresh();
+  await loadSession(sessionId);
+});
+setInterval(async () => {
+  if (document.hidden) return;
+  const summaries = await request("/api/sessions-summary").catch(() => null);
+  if (!summaries) return;
+  state.sessions = summaries.map((summary) => {
+    const existing = state.sessions.find((session) => session.id === summary.id);
+    return existing ? { ...existing, ...summary } : summary;
+  });
+  updateSessions();
+}, 2500);
 refresh()
   .then(async () => {
     const requested = new URLSearchParams(location.search).get("session");
