@@ -26,6 +26,14 @@ test("a lock left by a killed process (app update) is reclaimed", () => {
   assert.match(server, /age > 30000/);
 });
 
+test("deleted conversations are tombstoned and legacy migration cannot resurrect them", () => {
+  assert.match(server, /const DELETED_SESSIONS = join\(DATA, "deleted-sessions\.json"\)/);
+  assert.match(server, /deletedSessions\[id\] = new Date\(\)\.toISOString\(\)/);
+  assert.match(server, /if \(deletedSessions\[id\]\) \{\s*delete merged\[id\]/);
+  assert.match(server, /if \(existsSync\(SESSIONS\)\) return/);
+  assert.match(server, /if \(deletedSessions\[id\]\) continue/);
+});
+
 test("history merge keeps the most complete snapshot and never drops distinct messages", async () => {
   const start = server.indexOf("function normalizedMessageText");
   const end = server.indexOf("function mergeSessions(");

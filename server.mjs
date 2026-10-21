@@ -22,6 +22,7 @@ const DATA_DIR = process.env.NOCTAN_DATA_DIR || process.env.CLAUDE_X_DATA_DIR;
 const DATA = DATA_DIR ? resolve(DATA_DIR) : (process.platform === "win32" && process.env.APPDATA ? join(process.env.APPDATA, "Noctan", "data") : join(homedir(), ".noctan", "data"));
 const CONFIG = join(DATA, "config.json");
 const SESSIONS = join(DATA, "sessions.json");
+const DELETED_SESSIONS = join(DATA, "deleted-sessions.json");
 const ATTACHMENTS = join(DATA, "attachments");
 const SECRET_FILE = join(DATA, "anthropic-key.dpapi");
 const OPENAI_SECRET_FILE = join(DATA, "openai-key.dpapi");
@@ -51,6 +52,7 @@ const defaults = {
 };
 let config = { ...defaults },
   sessions = {},
+  deletedSessions = {},
   active = new Map(),
   approvals = new Map();
 // Each server process gets its own boot id. A session left with `inFlight`
@@ -180,6 +182,10 @@ function mergeMessageLists(...lists) {
 function mergeSessions(stored, incoming) {
   const merged = {...stored};
   for (const [id, current] of Object.entries(incoming || {})) {
+    if (deletedSessions[id]) {
+      delete merged[id];
+      continue;
+    }
     const previous = merged[id];
     if (!previous) { merged[id] = current; continue; }
     const messages = mergeMessageLists(previous.messages || [], current.messages || []);
@@ -227,6 +233,8 @@ async function deleteSessionById(id) {
   try {
     const onDisk = await loadJson(SESSIONS, {});
     if (!onDisk[id] && !sessions[id]) return false;
+    deletedSessions[id] = new Date().toISOString();
+    await saveJson(DELETED_SESSIONS, deletedSessions);
     delete onDisk[id];
     delete sessions[id];
     const tmp = SESSIONS + ".tmp-" + randomUUID();
@@ -1275,12 +1283,16 @@ async function migrateLegacyData() {
       break;
     }
   }
-  const all = await loadJson(SESSIONS, {});
+  // Import legacy conversations only when there is no current store yet.
+  // Re-running this on every update resurrected conversations the user deleted.
+  if (existsSync(SESSIONS)) return;
+  const all = {};
   let changed = false;
   for (const oldDir of legacyPaths) {
     const past = await loadJson(join(oldDir, "sessions.json"), {});
     for (const [id, item] of Object.entries(past)) {
       if (!item || !Array.isArray(item.messages)) continue;
+      if (deletedSessions[id]) continue;
       if (!all[id] || String(item.updatedAt || "") > String(all[id].updatedAt || "")) {
         all[id] = item;
         changed = true;
@@ -1290,9 +1302,11 @@ async function migrateLegacyData() {
   if (changed) await saveJson(SESSIONS, all);
 }
 await mkdir(DATA, { recursive: true });
+deletedSessions = await loadJson(DELETED_SESSIONS, {});
 await migrateLegacyData();
 config = cleanConfig(await loadJson(CONFIG, defaults));
 sessions = await loadJson(SESSIONS, {});
+for (const id of Object.keys(deletedSessions)) delete sessions[id];
 for (const session of Object.values(sessions)) {
   if (Array.isArray(session?.messages)) session.messages = mergeMessageLists(session.messages);
 }
