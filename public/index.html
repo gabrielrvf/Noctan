@@ -197,7 +197,7 @@
           <h2>Configurações do agente</h2>
           <button id="closeSettings" class="ghost">✕</button>
         </div>
-          <p class="hint">As configura&ccedil;&otilde;es s&atilde;o locais e a API Key fica criptografada pelo Windows.</p>
+          <p class="hint">As configura&ccedil;&otilde;es s&atilde;o locais e a API Key fica criptografada pelo sistema (Windows DPAPI ou Keychain do macOS).</p>
         <label
           >Workspace (caminho absoluto)<input
             id="workspace"
@@ -248,7 +248,7 @@
         </div>
         <p class="hint">
           Escolha OpenAI ou Anthropic. As chaves ficam protegidas localmente pela
-          criptografia do Windows.
+          criptografia do sistema.
         </p>
         <div class="integrationGrid">
           <div class="integration">
@@ -299,9 +299,9 @@
             type="password"
             autocomplete="off"
             spellcheck="false"
-            placeholder="Cole uma vez; o Windows protege a chave"
+            placeholder="Cole uma vez; o sistema protege a chave"
         /></label>
-          <p class="privacy">A chave fica protegida pela criptografia do Windows e n&atilde;o precisa ser inserida novamente a cada abertura.</p>
+          <p class="privacy">A chave fica protegida pela criptografia do sistema e n&atilde;o precisa ser inserida novamente a cada abertura.</p>
         <div class="oauthNote">
           <strong>Google e outros serviços</strong
           ><span

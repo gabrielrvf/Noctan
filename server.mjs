@@ -12,9 +12,11 @@ import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embe
 import { fileURLToPath } from "node:url";
 const BASE = dirname(fileURLToPath(import.meta.url));
 function resolveClaudeCodeExecutable() {
+  const pkg = `claude-agent-sdk-${process.platform}-${process.arch}`;
+  const exe = process.platform === "win32" ? "claude.exe" : "claude";
   const candidates = [
-    process.resourcesPath ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@anthropic-ai", "claude-agent-sdk-win32-x64", "claude.exe") : "",
-    join(BASE, "node_modules", "@anthropic-ai", "claude-agent-sdk-win32-x64", "claude.exe"),
+    process.resourcesPath ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@anthropic-ai", pkg, exe) : "",
+    join(BASE, "node_modules", "@anthropic-ai", pkg, exe),
   ].filter(Boolean);
   return candidates.find(existsSync) || undefined;
 }

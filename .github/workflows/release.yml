@@ -64,7 +64,7 @@ jobs:
           ./gradlew.bat :app:assembleRelease
           Copy-Item app/build/outputs/apk/release/app-release.apk ../../Noctan-Mobile.apk
 
-      - name: Publish desktop and Android atomically
+      - name: Upload Windows and Android to draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
@@ -73,7 +73,62 @@ jobs:
           $tag = "v$version"
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target "$env:GITHUB_SHA" --draft --title "Noctan v$version" --notes "Desktop e Android publicados juntos."
+            gh release create $tag --target "$env:GITHUB_SHA" --draft --title "Noctan v$version" --notes "Desktop (Windows e macOS) e Android publicados juntos."
           }
           gh release upload $tag "dist/Noctan-Setup-$version.exe" "dist/Noctan-Setup-$version.exe.blockmap" "dist/latest.yml" "Noctan-Mobile.apk" --clobber
-          gh release edit $tag --draft=false --latest
+
+  mac:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip release]') }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set release version
+        run: npm version --allow-same-version --no-git-tag-version "1.0.${{ github.run_number }}"
+
+      - name: Tests
+        run: npm run check
+
+      # Ad-hoc signed (mac.identity "-"); no Developer ID, so no latest-mac.yml/auto-update.
+      - name: Build macOS artifacts
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --mac dmg zip --arm64 --publish never
+
+      - name: Keep macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: noctan-mac
+          path: |
+            dist/Noctan-*-mac-arm64.dmg
+            dist/Noctan-*-mac-arm64.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [release, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: noctan-mac
+          path: mac
+
+      - name: Publish Windows, macOS and Android atomically
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="v1.0.${{ github.run_number }}"
+          gh release upload "$tag" mac/* --clobber
+          gh release edit "$tag" --draft=false --latest

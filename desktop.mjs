@@ -1,6 +1,17 @@
 import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
 import updaterPackage from "electron-updater";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+// Apps opened from Finder get launchd's bare PATH; MCP servers and CLIs installed
+// through the shell (nvm, ~/.local, Homebrew) only resolve with the login shell's PATH.
+if (process.platform === "darwin") {
+  try {
+    const out = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", 'printf "__NOCTAN_PATH__%s__NOCTAN_PATH__" "$PATH"'], { encoding: "utf8", timeout: 5000 });
+    const shellPath = out.match(/__NOCTAN_PATH__(.*)__NOCTAN_PATH__/)?.[1];
+    if (shellPath) process.env.PATH = shellPath;
+  } catch {}
+}
 
 const { autoUpdater } = updaterPackage;
 const APP_PORT = Number(process.env.PORT || 4177);
@@ -46,7 +57,7 @@ async function setupAutoUpdater() {
   ipcMain.handle("updater:get-status", () => ({ ...updateState }));
 
   ipcMain.handle("updater:check", async () => {
-    if (!app.isPackaged) return { ...updateState };
+    if (!app.isPackaged || process.platform === "darwin") return { ...updateState };
     await autoUpdater.checkForUpdates();
     return { ...updateState };
   });
@@ -63,6 +74,15 @@ async function setupAutoUpdater() {
     setUpdateState({
       status: "dev",
       message: "Atualizações automáticas só funcionam no app instalado.",
+    });
+    return;
+  }
+
+  // ponytail: Squirrel.Mac only installs Developer ID-signed builds; enable once the mac build is signed + notarized.
+  if (process.platform === "darwin") {
+    setUpdateState({
+      status: "dev",
+      message: "No macOS, baixe novas versões pela página de Releases.",
     });
     return;
   }
@@ -164,6 +184,7 @@ async function createWindow(targetUrl = APP_URL) {
     icon: appIcon,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
+    trafficLightPosition: { x: 12, y: 10 },
     titleBarOverlay: {
       color: "#0b0b0b",
       symbolColor: "#d8d8d8",
