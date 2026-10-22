@@ -37,7 +37,8 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);
   assert.match(workflow, /npm version --allow-same-version --no-git-tag-version/);
-  assert.match(workflow, /electron-builder --win nsis --publish never/);
+  assert.match(workflow, /npm run dist:win -- --publish never/);
+  assert.match(pkg.scripts['dist:win'], /tunnel:fetch.*electron-builder --win nsis/);
   assert.match(workflow, /gh release create .*--draft/);
   assert.match(workflow, /gh release upload/);
   assert.match(workflow, /gh release create/);

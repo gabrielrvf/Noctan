@@ -39,7 +39,7 @@ jobs:
         run: npm run check
 
       - name: Build desktop artifacts
-        run: npx electron-builder --win nsis --publish never
+        run: npm run dist:win -- --publish never
 
       - name: Java 21
         uses: actions/setup-java@v4

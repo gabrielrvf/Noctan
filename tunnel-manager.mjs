@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { arch, homedir, platform } from "node:os";
+import { ensureNoctanTunnelProfile, managedTunnelProfilePath, sourceTunnelProfilePath } from "./noctan-tunnel-profile.mjs";
 
 let child = null;
 let state = {
@@ -42,12 +43,31 @@ export function defaultControllerPath() {
   return find(join(home, "Documents", "Codex")) || find(join(home, "Downloads"));
 }
 
+function tunnelExecutableNames() {
+  return platform() === "win32"
+    ? ["tunnel-client-runtime-cloudflared.exe", "tunnel-client.exe"]
+    : ["tunnel-client-runtime-cloudflared", "tunnel-client"];
+}
+
+export function bundledTunnelExecutable() {
+  const platformArch = `${platform()}-${arch()}`;
+  const roots = [
+    process.env.NOCTAN_TUNNEL_CLIENT ? dirname(process.env.NOCTAN_TUNNEL_CLIENT) : "",
+    process.resourcesPath ? join(process.resourcesPath, "tunnel-client", platformArch) : "",
+    process.resourcesPath ? join(process.resourcesPath, "tunnel-client") : "",
+  ].filter(Boolean);
+  for (const root of roots)
+    for (const name of tunnelExecutableNames()) {
+      const candidate = join(root, name);
+      if (existsSync(candidate)) return candidate;
+    }
+  return process.env.NOCTAN_TUNNEL_CLIENT && existsSync(process.env.NOCTAN_TUNNEL_CLIENT)
+    ? process.env.NOCTAN_TUNNEL_CLIENT
+    : "";
+}
+
 function profilePath(profileName) {
-  return join(
-    process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
-    "tunnel-client",
-    `${profileName || "mcp-chatgpt-full-pc-dev"}.yaml`,
-  );
+  return sourceTunnelProfilePath(profileName || "mcp-chatgpt-full-pc-dev");
 }
 
 /** Caminho curto do Windows (8.3), sem espaços. Sem 8.3 disponível, devolve o original. */
@@ -91,9 +111,10 @@ export function repairProfile(profileName) {
   return fixed;
 }
 
-function profileHealthAddress(profileName) {
+function profileHealthAddress(profileName, managed = false) {
   try {
-    const text = readFileSync(profilePath(profileName), "utf8");
+    const file = managed ? managedTunnelProfilePath(profileName) : profilePath(profileName);
+    const text = readFileSync(file, "utf8");
     return text.match(/listen_addr:\s*["']?([^"'\r\n]+)["']?/i)?.[1]?.trim() || "127.0.0.1:8080";
   } catch {
     return "127.0.0.1:8080";
@@ -101,7 +122,7 @@ function profileHealthAddress(profileName) {
 }
 
 async function probeTunnelHealth(profileName, timeoutMs = 1200) {
-  const address = profileHealthAddress(profileName);
+  const address = profileHealthAddress(profileName, existsSync(managedTunnelProfilePath(profileName)));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -171,19 +192,22 @@ export async function startTunnel({ controllerPath, profile, runtimeKey }) {
   if (existing.status === "connected") return existing;
   if (child && !child.killed) return tunnelStatus();
 
-  let root = String(controllerPath || "").trim();
-  if (!root || !existsSync(join(root, "tunnel-client.exe")))
-    root = defaultControllerPath();
-  const executable = join(root, "tunnel-client.exe");
+  let executable = bundledTunnelExecutable();
+  let root = executable ? dirname(executable) : String(controllerPath || "").trim();
+  if (!executable) {
+    if (!root || !tunnelExecutableNames().some((name) => existsSync(join(root, name))))
+      root = defaultControllerPath();
+    executable = tunnelExecutableNames().map((name) => join(root, name)).find(existsSync) || "";
+  }
 
-  if (!root || !existsSync(executable))
-    throw Error("tunnel-client.exe não foi encontrado na pasta do PC Controller.");
+  if (!root || !executable || !existsSync(executable))
+    throw Error("O Secure MCP Tunnel não está incluído nesta instalação do Noctan.");
   if (!runtimeKey)
     throw Error("Informe a Runtime API Key do Secure MCP Tunnel.");
   if (!existsSync(profilePath(profileName)))
-    throw Error("O profile do PC Controller ainda não foi inicializado neste Windows.");
-  const repaired = repairProfile(profileName);
-  if (repaired.length) console.warn(`Noctan: profile do tunnel consertado (${repaired.join(", ")}).`);
+    throw Error("O túnel ainda não foi vinculado à conta do ChatGPT neste computador.");
+  const managed = ensureNoctanTunnelProfile(profileName, { port: Number(process.env.PORT || 4177) });
+  const repaired = [];
 
   state = {
     status: "connecting",
@@ -192,7 +216,7 @@ export async function startTunnel({ controllerPath, profile, runtimeKey }) {
     lastError: "",
   };
 
-  child = spawn(executable, ["run", "--profile", profileName], {
+  child = spawn(executable, ["run", "--profile-file", managed.target], {
     cwd: root,
     windowsHide: true,
     shell: false,

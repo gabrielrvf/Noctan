@@ -16,9 +16,11 @@ test("equivalent handoffs have the same idempotency fingerprint", () => {
 
 test("desktop handoff avoids browser fallback and claims pending prompt once", () => {
   const bridge = readFileSync(new URL("../bridge.mjs", import.meta.url), "utf8");
+  const noctanMcp = readFileSync(new URL("../noctan-mcp.mjs", import.meta.url), "utf8");
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-  assert.match(bridge, /!handoff\.openedInDesktop/);
+  assert.match(bridge, /createNoctanMcpServer/);
+  assert.match(noctanMcp, /!handoff\.openedInDesktop/);
   assert.match(server, /claim-pending/);
   assert.match(app, /\/claim-pending/);
   assert.match(app, /noctanDesktop\?\.onHandoff/);

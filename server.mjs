@@ -9,6 +9,8 @@ import { saveApiKey, loadApiKey, removeApiKey } from "./secure-key.mjs";
 import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelStatusLive } from "./tunnel-manager.mjs";
 import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
 import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embedded-pc-controller.mjs";
+import { createNoctanMcpServer } from "./noctan-mcp.mjs";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { fileURLToPath } from "node:url";
 const BASE = dirname(fileURLToPath(import.meta.url));
 function resolveClaudeCodeExecutable() {
@@ -1355,6 +1357,20 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
     const path = url.pathname;
+    if (path === "/mcp") {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      const mcpServer = createNoctanMcpServer({ baseUrl: `http://${HOST}:${PORT}` });
+      try {
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req, res);
+      } finally {
+        await mcpServer.close().catch(() => {});
+      }
+      return;
+    }
     if (
       req.headers.origin &&
       !["http://127.0.0.1:" + PORT, "http://localhost:" + PORT].includes(
