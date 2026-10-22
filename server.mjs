@@ -10,6 +10,7 @@ import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelSta
 import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
 import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embedded-pc-controller.mjs";
 import { createNoctanMcpServer } from "./noctan-mcp.mjs";
+import { importGeneratedImages } from "./generated-images.mjs";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { fileURLToPath } from "node:url";
 const BASE = dirname(fileURLToPath(import.meta.url));
@@ -794,6 +795,7 @@ async function runAgent(req, res) {
   let finalText = "",
     spent = 0,
     assistantRecord = null;
+  const generatedImageEvidence = [];
   const persistAssistant = async () => {
     if (agentTargetId) return;
     const running = active.get(id);
@@ -854,6 +856,7 @@ async function runAgent(req, res) {
           send(res, "tool", { name, input: redact(input) }),
       });
       finalText = result.text;
+      generatedImageEvidence.push(result.imageEvidence || [], finalText);
       s.openaiResponseId = result.responseId;
       send(res, "text", { text: finalText });
       await persistAssistant();
@@ -962,6 +965,7 @@ async function runAgent(req, res) {
       }
       try {
       for await (const m of q) {
+      generatedImageEvidence.push(m.message?.content || m.result || []);
       if ((m.message?.content || []).some((block) =>
         block?.type === "tool_result" && /session terminated/i.test(
           typeof block.content === "string" ? block.content : JSON.stringify(block.content || ""),
@@ -1108,10 +1112,23 @@ async function runAgent(req, res) {
       send(res, "notice", { text: "A sessão anterior do Claude expirou; o contexto salvo foi restaurado automaticamente." });
     }
     }
+    const generatedAttachments = agentTargetId ? [] : await importGeneratedImages({
+      evidence: generatedImageEvidence,
+      workspace: config.workspace,
+      attachmentsDir: ATTACHMENTS,
+    });
+    if (generatedAttachments.length) {
+      if (!assistantRecord) {
+        assistantRecord = { role: "assistant", text: finalText.trim() || "Imagem gerada", costUsd: spent, provider, at: new Date().toISOString() };
+        s.messages.push(assistantRecord);
+      }
+      assistantRecord.attachments = [...new Set([...(assistantRecord.attachments || []), ...generatedAttachments])];
+      send(res, "attachments", { attachments: assistantRecord.attachments });
+    }
     if (agentTargetId) {
       sessions[id] = s;
       await saveJson(SESSIONS, sessions);
-    } else if (finalText.trim()) {
+    } else if (finalText.trim() || generatedAttachments.length) {
       await persistAssistant();
     } else {
       s.messages.push({ role: "assistant", text: "(Sem resposta textual)", costUsd: spent, provider, at: new Date().toISOString() });

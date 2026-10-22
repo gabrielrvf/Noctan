@@ -1,0 +1,58 @@
+import { copyFile, mkdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { basename, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+
+const IMAGE_EXTENSION = /\.(?:png|jpe?g|webp|gif)$/i;
+const ABSOLUTE_IMAGE_PATH = /(?:file:\/\/\/)?(?:[A-Za-z]:[\\/]|\/)[^<>"'|\r\n]*?\.(?:png|jpe?g|webp|gif)\b/gi;
+
+function textValues(value, output = [], depth = 0) {
+  if (depth > 8 || output.length > 500) return output;
+  if (typeof value === "string") {
+    if (value.length <= 200_000 && !value.startsWith("data:image/")) output.push(value);
+    return output;
+  }
+  if (Array.isArray(value)) for (const item of value) textValues(item, output, depth + 1);
+  else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) textValues(item, output, depth + 1);
+  }
+  return output;
+}
+
+export function generatedImagePathCandidates(value, workspace = "") {
+  const candidates = new Set();
+  for (const text of textValues(value)) {
+    const trimmed = text.trim().replace(/^['"`]|['"`]$/g, "");
+    if (IMAGE_EXTENSION.test(trimmed) && trimmed.length < 4096) {
+      candidates.add(isAbsolute(trimmed) ? trimmed : resolve(workspace || ".", trimmed));
+    }
+    for (const match of text.matchAll(ABSOLUTE_IMAGE_PATH)) {
+      let candidate = match[0].replace(/^file:\/\/\//i, "");
+      try { candidate = decodeURIComponent(candidate); } catch {}
+      candidates.add(candidate);
+    }
+  }
+  return [...candidates];
+}
+
+export async function importGeneratedImages({ evidence, workspace, attachmentsDir }) {
+  const saved = [];
+  const seen = new Set();
+  const attachmentRoot = resolve(attachmentsDir);
+  await mkdir(attachmentRoot, { recursive: true });
+  for (const candidate of generatedImagePathCandidates(evidence, workspace)) {
+    const source = resolve(candidate);
+    const key = source.toLowerCase();
+    if (seen.has(key) || source === attachmentRoot || source.startsWith(attachmentRoot + sep)) continue;
+    seen.add(key);
+    if (!existsSync(source) || !IMAGE_EXTENSION.test(source)) continue;
+    const info = await stat(source).catch(() => null);
+    if (!info?.isFile() || info.size < 1 || info.size > 20_000_000) continue;
+    const extension = extname(source).toLowerCase() || ".png";
+    const safeBase = basename(source, extname(source)).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "imagem";
+    const name = `generated-${safeBase}-${randomUUID()}${extension}`;
+    await copyFile(source, join(attachmentRoot, name));
+    saved.push(name);
+  }
+  return saved;
+}

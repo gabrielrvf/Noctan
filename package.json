@@ -47,6 +47,7 @@
       "mcp-client.mjs",
       "tunnel-manager.mjs",
       "noctan-tunnel-profile.mjs",
+      "generated-images.mjs",
       "server.mjs",
       "public/**/*",
       "data/.gitkeep",

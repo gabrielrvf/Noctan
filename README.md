@@ -78,6 +78,8 @@ Fechar a janela pelo **X** apenas recolhe o Noctan para a bandeja do sistema, ma
 
 O pacote do controlador é fixado no `package-lock.json` para que uma instalação reproduzível leve junto as ferramentas compatíveis. O chat interno usa esse controlador diretamente. O túnel externo aponta para o endpoint MCP HTTP do Noctan, e não para uma instalação separada do PC Controller. Configurações MCP adicionais continuam opcionais.
 
+Imagens geradas pelas ferramentas são importadas automaticamente para os anexos da conversa e aparecem dentro da resposta no Desktop e no Android. O Noctan preserva uma cópia privada no armazenamento do aplicativo para que a imagem continue disponível no histórico.
+
 ## Android
 
 Cada Release publica o Desktop e o APK com a mesma versão. Baixe `Noctan-Mobile-<versão>.apk` na mesma página de [Releases](https://github.com/yanoliveira16/Noctan/releases/latest).
