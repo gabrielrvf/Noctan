@@ -33,6 +33,17 @@ test('renderer exposes update button and restart-to-update flow', () => {
   assert.match(app, /status\.currentVersion/);
 });
 
+test('closing the desktop window keeps Noctan running in the system tray', () => {
+  assert.match(desktop, /new Tray\(icon\)/);
+  assert.match(desktop, /Noctan — executando em segundo plano/);
+  assert.match(desktop, /window\.on\("close", \(event\) =>/);
+  assert.match(desktop, /event\.preventDefault\(\);\s*window\.hide\(\);/s);
+  assert.match(desktop, /label: "Abrir Noctan"/);
+  assert.match(desktop, /label: "Sair"/);
+  assert.match(desktop, /app\.on\("before-quit", \(\) => \{ isQuitting = true; \}\)/);
+  assert.doesNotMatch(desktop, /window-all-closed", \(\) => app\.quit\(\)/);
+});
+
 test('main branch publishes incrementing GitHub releases deterministically', () => {
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);

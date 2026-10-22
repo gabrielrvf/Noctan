@@ -74,6 +74,8 @@ No Desktop, o botão **PC Controller** mostra o estado do controlador local:
 - verde: controlador local disponível;
 - vermelho: desconectado ou com erro; clique para tentar reconectar.
 
+Fechar a janela pelo **X** apenas recolhe o Noctan para a bandeja do sistema, mantendo o servidor, o túnel, o APK e o PC Controller ativos em segundo plano. Clique no ícone da bandeja para reabrir; use **Sair** no menu do ícone quando quiser encerrar tudo de verdade.
+
 O pacote do controlador é fixado no `package-lock.json` para que uma instalação reproduzível leve junto as ferramentas compatíveis. O chat interno usa esse controlador diretamente. O túnel externo aponta para o endpoint MCP HTTP do Noctan, e não para uma instalação separada do PC Controller. Configurações MCP adicionais continuam opcionais.
 
 ## Android
