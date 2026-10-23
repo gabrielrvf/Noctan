@@ -31,6 +31,7 @@ export async function runOpenAI({
 
   let response;
   let input = [{ role: "user", content }];
+  const imageEvidence = [];
   try {
     for (let turn = 0; turn < 20; turn += 1) {
       response = await client.responses.create(
@@ -53,6 +54,7 @@ export async function runOpenAI({
           text: response.output_text || "(Sem resposta textual)",
           responseId: response.id,
           usage: response.usage || null,
+          imageEvidence,
         };
 
       input = [];
@@ -67,6 +69,7 @@ export async function runOpenAI({
         if (allowed) {
           try {
             output = await mcp.call(call.name, args);
+            imageEvidence.push(output);
           } catch (error) {
             output = `Erro da ferramenta: ${error.message}`;
           }

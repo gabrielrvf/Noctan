@@ -5,7 +5,7 @@
 <h1 align="center">Noctan</h1>
 
 <p align="center">
-  <strong>Workspace de IA local para Windows, com PC Controller integrado e aplicativo Android.</strong>
+  <strong>Workspace de IA local com PC Controller integrado e aplicativo Android.</strong>
 </p>
 
 <p align="center">
@@ -58,7 +58,11 @@ Essa chave é usada pelo chat Claude dentro do Noctan. Consulte diretamente a An
 
 ### Runtime API Key do Secure Tunnel
 
-A **Runtime API Key do Secure Tunnel** é opcional e diferente da chave OpenAI usada pelo GPT. Ela só é necessária para conectar o PC Controller a uma sessão externa compatível do ChatGPT. Para usar o Noctan como aplicativo standalone no próprio PC, a Runtime Key não é obrigatória.
+A **Runtime API Key do Secure Tunnel** é opcional e diferente da chave OpenAI usada pelo GPT. Ela só é necessária para entregar tarefas de uma sessão externa compatível do ChatGPT ao Noctan. Para usar o chat do próprio Noctan, a Runtime Key não é obrigatória.
+
+O Desktop empacota o runtime oficial do Secure MCP Tunnel correspondente à plataforma. Quando existe um túnel previamente vinculado à conta, o Noctan cria um perfil próprio, sem copiar a chave, preserva o perfil antigo e passa a expor pelo túnel somente `noctan_status` e `handoff_to_noctan`. A tarefa entra no histórico do Noctan e é executada pelo provedor e pelas ferramentas locais configuradas no aplicativo.
+
+O ChatGPT não descobre aplicativos locais apenas por uma instrução escrita no prompt. Para receber tarefas originadas no ChatGPT, a conta precisa autorizar uma vez o app/conector **Noctan**. Depois desse vínculo, não é necessário instalar o repositório PC Controller, Node.js ou manter PowerShell aberto. O Noctan Desktop precisa estar aberto (pode ficar minimizado), pois ele mantém o servidor local e o Secure MCP Tunnel ativos. Remover ou desconectar o app Noctan no ChatGPT remove esse canal e exige uma nova autorização. Uma distribuição pública sem configuração manual exigirá publicar o Noctan como App do ChatGPT com autenticação e roteamento por usuário; não é seguro compartilhar um único Tunnel ID ou uma Runtime Key entre usuários.
 
 As chaves salvas pelo Noctan ficam em arquivos protegidos pela criptografia vinculada ao usuário do Windows. Nunca publique chaves no GitHub, no README, no Vault ou em conversas compartilhadas.
 
@@ -70,7 +74,11 @@ No Desktop, o botão **PC Controller** mostra o estado do controlador local:
 - verde: controlador local disponível;
 - vermelho: desconectado ou com erro; clique para tentar reconectar.
 
-O pacote do controlador é fixado no `package-lock.json` para que uma instalação reproduzível leve junto as ferramentas compatíveis. Configurações MCP adicionais continuam opcionais.
+Fechar a janela pelo **X** apenas recolhe o Noctan para a bandeja do sistema, mantendo o servidor, o túnel, o APK e o PC Controller ativos em segundo plano. Clique no ícone da bandeja para reabrir; use **Sair** no menu do ícone quando quiser encerrar tudo de verdade.
+
+O pacote do controlador é fixado no `package-lock.json` para que uma instalação reproduzível leve junto as ferramentas compatíveis. O chat interno usa esse controlador diretamente. O túnel externo aponta para o endpoint MCP HTTP do Noctan, e não para uma instalação separada do PC Controller. Configurações MCP adicionais continuam opcionais.
+
+Imagens geradas pelas ferramentas são importadas automaticamente para os anexos da conversa e aparecem dentro da resposta no Desktop e no Android. O Noctan preserva uma cópia privada no armazenamento do aplicativo para que a imagem continue disponível no histórico.
 
 ## Android
 
@@ -107,7 +115,7 @@ A Release só sai do rascunho depois que os builds de Windows, Android e macOS t
 
 ## Desenvolvimento
 
-Requisitos de desenvolvimento: Windows e Node.js 20 ou superior.
+Requisitos de desenvolvimento: Windows ou macOS e Node.js 20 ou superior.
 
 ```powershell
 npm install
@@ -140,7 +148,9 @@ Requisitos: macOS em Apple Silicon (arm64) e Node.js 20 ou superior. Os mesmos c
 npm run dist:mac
 ```
 
-No macOS, as chaves são cifradas com AES-256-GCM e a chave-mestra fica no Keychain do usuário (item `Noctan`). Os dados ficam em `~/Library/Application Support/Noctan/data`. O PC Controller usa o shell de login (`$SHELL -lc`) e o Chrome, configuráveis em `pc-controller-settings.json` nessa pasta. O build é assinado ad-hoc: não há atualização automática no macOS até existir assinatura Developer ID com notarização, e um `.dmg` baixado da internet precisa de `xattr -cr /Applications/Noctan.app` na primeira abertura. O Secure Tunnel (`tunnel-client.exe`) continua exclusivo do Windows.
+Os comandos de distribuição baixam o runtime oficial do Secure MCP Tunnel para a plataforma, verificam o SHA-256 publicado pela OpenAI e o incluem no pacote.
+
+No macOS, as chaves são cifradas com AES-256-GCM e a chave-mestra fica no Keychain do usuário (item `Noctan`). Os dados ficam em `~/Library/Application Support/Noctan/data`. O PC Controller usa o shell de login (`$SHELL -lc`) e o Chrome, configuráveis em `pc-controller-settings.json` nessa pasta. As ferramentas do PC Controller ainda devem ser validadas individualmente no macOS; conexão verde confirma transporte, não compatibilidade de todos os comandos específicos do sistema operacional. O build é assinado ad-hoc: não há atualização automática no macOS até existir assinatura Developer ID com notarização, e um `.dmg` baixado da internet precisa de `xattr -cr /Applications/Noctan.app` na primeira abertura.
 
 Tecnologias principais: JavaScript, HTML, CSS, Node.js, Electron, OpenAI Responses API, Claude Agent SDK, WebSocket e Android WebView.
 

@@ -33,11 +33,23 @@ test('renderer exposes update button and restart-to-update flow', () => {
   assert.match(app, /status\.currentVersion/);
 });
 
+test('closing the desktop window keeps Noctan running in the system tray', () => {
+  assert.match(desktop, /new Tray\(icon\)/);
+  assert.match(desktop, /Noctan — executando em segundo plano/);
+  assert.match(desktop, /window\.on\("close", \(event\) =>/);
+  assert.match(desktop, /event\.preventDefault\(\);\s*window\.hide\(\);/s);
+  assert.match(desktop, /label: "Abrir Noctan"/);
+  assert.match(desktop, /label: "Sair"/);
+  assert.match(desktop, /app\.on\("before-quit", \(\) => \{ isQuitting = true; \}\)/);
+  assert.doesNotMatch(desktop, /window-all-closed", \(\) => app\.quit\(\)/);
+});
+
 test('main branch publishes incrementing GitHub releases deterministically', () => {
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.run_number/);
   assert.match(workflow, /npm version --allow-same-version --no-git-tag-version/);
-  assert.match(workflow, /electron-builder --win nsis --publish never/);
+  assert.match(workflow, /npm run dist:win -- --publish never/);
+  assert.match(pkg.scripts['dist:win'], /tunnel:fetch.*electron-builder --win nsis/);
   assert.match(workflow, /gh release create .*--draft/);
   assert.match(workflow, /gh release upload/);
   assert.match(workflow, /gh release create/);
@@ -48,7 +60,8 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /NOCTAN_ANDROID_DEBUG_KEYSTORE/);
   assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Upload Windows and Android to draft release'));
-  assert.match(workflow, /electron-builder --mac dmg zip --arm64 --publish never/);
+  assert.match(workflow, /npm run dist:mac -- --arm64 --publish never/);
+  assert.match(pkg.scripts['dist:mac'], /tunnel:fetch.*electron-builder --mac dmg zip/);
   assert.match(workflow, /needs: \[release, mac\]/);
   assert.match(workflow, /gh release edit "\$tag" --draft=false --latest/);
   assert.match(workflow, /GITHUB_TOKEN/);

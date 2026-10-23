@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain } from "electron";
 import updaterPackage from "electron-updater";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -18,6 +18,43 @@ const APP_PORT = Number(process.env.PORT || 4177);
 const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function setupTray(iconPath) {
+  if (tray) return tray;
+  const source = nativeImage.createFromPath(iconPath);
+  const icon = source.resize({ width: 20, height: 20 });
+  if (process.platform === "darwin") {
+    // Menu bar: 18pt template (system tints it for light/dark), with a Retina rep.
+    const mac = source.resize({ width: 18, height: 18, quality: "best" });
+    mac.addRepresentation({ scaleFactor: 2, buffer: source.resize({ width: 36, height: 36, quality: "best" }).toPNG() });
+    mac.setTemplateImage(true);
+    tray = new Tray(mac);
+  } else tray = new Tray(icon);
+  tray.setToolTip("Noctan — executando em segundo plano");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Abrir Noctan", click: showMainWindow },
+    { type: "separator" },
+    {
+      label: "Sair",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]));
+  tray.on("click", showMainWindow);
+  tray.on("double-click", showMainWindow);
+  return tray;
+}
 
 function numericVersion(value) {
   const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
@@ -173,6 +210,7 @@ async function createWindow(targetUrl = APP_URL) {
   await import("./mobile-gateway.mjs");
 
   const appIcon = join(app.getAppPath(), "public", "noctan-mark.png");
+  setupTray(appIcon);
 
   const window = new BrowserWindow({
     width: 1440,
@@ -199,6 +237,11 @@ async function createWindow(targetUrl = APP_URL) {
     },
   });
   mainWindow = window;
+  window.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    window.hide();
+  });
   window.on("closed", () => { if (mainWindow === window) mainWindow = null; });
   serverModule.setDesktopHandoffHandler(({ sessionId }) => {
     if (window.isDestroyed()) return false;
@@ -268,10 +311,11 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    showMainWindow();
   });
+  // macOS: clicking the Dock icon reopens the window hidden by close.
+  app.on("activate", showMainWindow);
+  app.on("before-quit", () => { isQuitting = true; });
   app
     .whenReady()
     .then(async () => {
@@ -285,4 +329,6 @@ if (!hasSingleInstanceLock) {
     });
 }
 
-app.on("window-all-closed", () => app.quit());
+app.on("window-all-closed", () => {
+  // O servidor, o túnel e o PC Controller continuam ativos na bandeja.
+});

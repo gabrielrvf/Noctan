@@ -198,7 +198,13 @@ function message(role, text, attachments = [], messageIndex = null) {
   const e = document.createElement("div");
   e.className = "message " + role;
   e.rawText = text;
-  if (role === "assistant") renderMarkdown(e, text);
+  if (role === "assistant") {
+    const body = document.createElement("div");
+    body.className = "messageText";
+    renderMarkdown(body, text);
+    e.append(body);
+    appendMessageAttachments(e, attachments, "Imagem gerada");
+  }
   else {
     const body = document.createElement("div");
     body.className = "messageText";
@@ -214,28 +220,31 @@ function message(role, text, attachments = [], messageIndex = null) {
       edit.onclick = (event) => { event.stopPropagation(); editUserMessage(messageIndex, text); };
       e.append(edit);
     }
-    const messageAttachments = Array.isArray(attachments) ? attachments : [];
-    if (messageAttachments.length) {
-      const gallery = document.createElement("div");
-      gallery.className = "messageAttachmentGallery";
-      for (const item of messageAttachments) {
-        const name = typeof item === "string" ? item : String(item?.name || "");
-        const src = typeof item === "string" ? "/api/attachments/" + encodeURIComponent(item) : String(item?.dataUrl || item?.src || "");
-        if (!src) continue;
-        const image = document.createElement("img");
-        image.src = src;
-        image.alt = name || "Imagem enviada";
-        image.title = "Clique para visualizar";
-        image.loading = "lazy";
-        image.onclick = () => openAttachmentPreview({ name, dataUrl: src });
-        gallery.append(image);
-      }
-      e.append(gallery);
-    }
+    appendMessageAttachments(e, attachments, "Imagem enviada");
   }
   $("chat").append(e);
   $("chat").scrollTop = $("chat").scrollHeight;
   return e;
+}
+
+function appendMessageAttachments(element, attachments, altText) {
+  const messageAttachments = Array.isArray(attachments) ? attachments : [];
+  if (!messageAttachments.length) return;
+  const gallery = document.createElement("div");
+  gallery.className = "messageAttachmentGallery";
+  for (const item of messageAttachments) {
+    const name = typeof item === "string" ? item : String(item?.name || "");
+    const src = typeof item === "string" ? "/api/attachments/" + encodeURIComponent(item) : String(item?.dataUrl || item?.src || "");
+    if (!src) continue;
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = name || altText;
+    image.title = "Clique para visualizar";
+    image.loading = "lazy";
+    image.onclick = () => openAttachmentPreview({ name, dataUrl: src });
+    gallery.append(image);
+  }
+  element.append(gallery);
 }
 async function editUserMessage(index, currentText) {
   if (state.running) { alert("Aguarde a execução atual terminar para editar essa mensagem."); return; }
