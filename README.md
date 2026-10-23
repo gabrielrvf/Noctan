@@ -108,9 +108,10 @@ O Desktop verifica atualizações pelo `latest.yml`. Uma Release completa conté
 - `Noctan-Setup-<versão>.exe`;
 - `Noctan-Setup-<versão>.exe.blockmap`;
 - `latest.yml`;
-- `Noctan-Mobile-<versão>.apk`.
+- `Noctan-Mobile-<versão>.apk`;
+- `Noctan-<versão>-mac-arm64.dmg` e `Noctan-<versão>-mac-arm64.zip` (macOS Apple Silicon, sem atualização automática).
 
-Desktop e APK são construídos pelo mesmo workflow de release. O APK não é commitado como binário no histórico do Git; ele é publicado nos assets da Release.
+A Release só sai do rascunho depois que os builds de Windows, Android e macOS terminam. Desktop e APK são construídos pelo mesmo workflow de release. O APK não é commitado como binário no histórico do Git; ele é publicado nos assets da Release.
 
 ## Desenvolvimento
 
@@ -139,13 +140,17 @@ Para gerar o instalador local:
 npm run dist:win
 ```
 
-No macOS:
+### macOS
+
+Requisitos: macOS em Apple Silicon (arm64) e Node.js 20 ou superior. Os mesmos comandos `npm install`, `npm start`, `npm run desktop` e `npm run check` funcionam. Para gerar `.dmg` e `.zip` em `dist/`:
 
 ```bash
 npm run dist:mac
 ```
 
-Os comandos de distribuição baixam o runtime oficial do Secure MCP Tunnel para a plataforma, verificam o SHA-256 publicado pela OpenAI e o incluem no pacote. As ferramentas do PC Controller ainda devem ser validadas individualmente no macOS; conexão verde confirma transporte, não compatibilidade de todos os comandos específicos do sistema operacional.
+Os comandos de distribuição baixam o runtime oficial do Secure MCP Tunnel para a plataforma, verificam o SHA-256 publicado pela OpenAI e o incluem no pacote.
+
+No macOS, as chaves são cifradas com AES-256-GCM e a chave-mestra fica no Keychain do usuário (item `Noctan`). Os dados ficam em `~/Library/Application Support/Noctan/data`. O PC Controller usa o shell de login (`$SHELL -lc`) e o Chrome, configuráveis em `pc-controller-settings.json` nessa pasta. As ferramentas do PC Controller ainda devem ser validadas individualmente no macOS; conexão verde confirma transporte, não compatibilidade de todos os comandos específicos do sistema operacional. O build é assinado ad-hoc: não há atualização automática no macOS até existir assinatura Developer ID com notarização, e um `.dmg` baixado da internet precisa de `xattr -cr /Applications/Noctan.app` na primeira abertura.
 
 Tecnologias principais: JavaScript, HTML, CSS, Node.js, Electron, OpenAI Responses API, Claude Agent SDK, WebSocket e Android WebView.
 

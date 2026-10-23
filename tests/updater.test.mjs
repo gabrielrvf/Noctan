@@ -59,7 +59,11 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.doesNotMatch(workflow, /^  mobile:/m);
   assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /NOCTAN_ANDROID_DEBUG_KEYSTORE/);
-  assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Publish desktop and Android atomically'));
+  assert.ok(workflow.indexOf('Build matching Android APK') < workflow.indexOf('Upload Windows and Android to draft release'));
+  assert.match(workflow, /npm run dist:mac -- --arm64 --publish never/);
+  assert.match(pkg.scripts['dist:mac'], /tunnel:fetch.*electron-builder --mac dmg zip/);
+  assert.match(workflow, /needs: \[release, mac\]/);
+  assert.match(workflow, /gh release edit "\$tag" --draft=false --latest/);
   assert.match(workflow, /GITHUB_TOKEN/);
 });
 

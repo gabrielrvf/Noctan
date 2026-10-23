@@ -1,6 +1,17 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain } from "electron";
 import updaterPackage from "electron-updater";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+// Apps opened from Finder get launchd's bare PATH; MCP servers and CLIs installed
+// through the shell (nvm, ~/.local, Homebrew) only resolve with the login shell's PATH.
+if (process.platform === "darwin") {
+  try {
+    const out = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", 'printf "__NOCTAN_PATH__%s__NOCTAN_PATH__" "$PATH"'], { encoding: "utf8", timeout: 5000 });
+    const shellPath = out.match(/__NOCTAN_PATH__(.*)__NOCTAN_PATH__/)?.[1];
+    if (shellPath) process.env.PATH = shellPath;
+  } catch {}
+}
 
 const { autoUpdater } = updaterPackage;
 const APP_PORT = Number(process.env.PORT || 4177);
@@ -19,8 +30,15 @@ function showMainWindow() {
 
 function setupTray(iconPath) {
   if (tray) return tray;
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 });
-  tray = new Tray(icon);
+  const source = nativeImage.createFromPath(iconPath);
+  const icon = source.resize({ width: 20, height: 20 });
+  if (process.platform === "darwin") {
+    // Menu bar: 18pt template (system tints it for light/dark), with a Retina rep.
+    const mac = source.resize({ width: 18, height: 18, quality: "best" });
+    mac.addRepresentation({ scaleFactor: 2, buffer: source.resize({ width: 36, height: 36, quality: "best" }).toPNG() });
+    mac.setTemplateImage(true);
+    tray = new Tray(mac);
+  } else tray = new Tray(icon);
   tray.setToolTip("Noctan — executando em segundo plano");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Abrir Noctan", click: showMainWindow },
@@ -76,7 +94,7 @@ async function setupAutoUpdater() {
   ipcMain.handle("updater:get-status", () => ({ ...updateState }));
 
   ipcMain.handle("updater:check", async () => {
-    if (!app.isPackaged) return { ...updateState };
+    if (!app.isPackaged || process.platform === "darwin") return { ...updateState };
     await autoUpdater.checkForUpdates();
     return { ...updateState };
   });
@@ -93,6 +111,15 @@ async function setupAutoUpdater() {
     setUpdateState({
       status: "dev",
       message: "Atualizações automáticas só funcionam no app instalado.",
+    });
+    return;
+  }
+
+  // ponytail: Squirrel.Mac only installs Developer ID-signed builds; enable once the mac build is signed + notarized.
+  if (process.platform === "darwin") {
+    setUpdateState({
+      status: "dev",
+      message: "No macOS, baixe novas versões pela página de Releases.",
     });
     return;
   }
@@ -195,6 +222,7 @@ async function createWindow(targetUrl = APP_URL) {
     icon: appIcon,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
+    trafficLightPosition: { x: 12, y: 10 },
     titleBarOverlay: {
       color: "#0b0b0b",
       symbolColor: "#d8d8d8",
@@ -285,6 +313,8 @@ if (!hasSingleInstanceLock) {
   app.on("second-instance", () => {
     showMainWindow();
   });
+  // macOS: clicking the Dock icon reopens the window hidden by close.
+  app.on("activate", showMainWindow);
   app.on("before-quit", () => { isQuitting = true; });
   app
     .whenReady()

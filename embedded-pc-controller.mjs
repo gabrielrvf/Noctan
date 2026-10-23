@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const BASE = dirname(fileURLToPath(import.meta.url));
@@ -17,16 +18,34 @@ export function embeddedPcControllerEntry() {
   return candidates.find(existsSync) || candidates[0];
 }
 
+// The controller defaults to powershell.exe/msedge; on macOS seed a settings file
+// (user-editable afterwards) that uses the login shell and Chrome instead.
+function macSettingsPath(dir) {
+  const file = join(dir, "pc-controller-settings.json");
+  if (!existsSync(file)) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      shell: { command: process.env.SHELL || "/bin/zsh", args: ["-lc"] },
+      browser: { preferredChannel: "chrome", fallbackToChromium: true },
+    }, null, 2));
+  }
+  return file;
+}
+
 export function embeddedPcControllerDefinition() {
   const electronRuntime = Boolean(process.versions?.electron);
+  const cwd = process.env.NOCTAN_DATA_DIR || process.cwd();
   return {
     command: process.execPath,
     args: [embeddedPcControllerEntry()],
     env: {
       ...(electronRuntime ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
       NOCTAN_EMBEDDED_PC_CONTROLLER: "1",
+      ...(process.platform === "darwin"
+        ? { MCP_SETTINGS_PATH: macSettingsPath(process.env.NOCTAN_DATA_DIR || join(homedir(), ".noctan", "data")) }
+        : {}),
     },
-    cwd: process.env.NOCTAN_DATA_DIR || process.cwd(),
+    cwd,
   };
 }
 

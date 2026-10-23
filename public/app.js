@@ -1602,7 +1602,7 @@ async function listMicrophones() {
   } catch (error) {
     const hint = document.createElement("span");
     hint.className = "micHint";
-    hint.textContent = `Libere o microfone no Windows para listar os dispositivos. (${error.message})`;
+    hint.textContent = `Libere o microfone nas configurações do sistema para listar os dispositivos. (${error.message})`;
     container.append(hint);
   }
 }

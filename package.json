@@ -15,7 +15,7 @@
     "check": "node --check server.mjs && node --check desktop.mjs && node --check public/app.js && node --test tests/*.test.mjs",
     "tunnel:fetch": "node scripts/fetch-tunnel-client.mjs",
     "dist:win": "npm run tunnel:fetch && electron-builder --win nsis",
-    "dist:mac": "npm run tunnel:fetch && electron-builder --mac dmg"
+    "dist:mac": "npm run tunnel:fetch && electron-builder --mac dmg zip"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.302",
@@ -90,6 +90,7 @@
     },
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*",
+      "node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**/*",
       "node_modules/mcp-chatgpt-full-pc-dev/**/*",
       "node_modules/playwright/**/*",
       "node_modules/playwright-core/**/*"
@@ -101,7 +102,21 @@
         "repo": "Noctan",
         "releaseType": "release"
       }
-    ]
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "Noctan-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O Noctan usa o microfone para ditado por voz."
+      }
+    }
   },
   "engines": {
     "node": ">=20"

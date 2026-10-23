@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 test("repairProfile desfaz o hard link e tira o espaço do executável", async () => {
   const appdata = mkdtempSync(join(tmpdir(), "noctan-tun-"));
   process.env.APPDATA = appdata;
+  process.env.XDG_CONFIG_HOME = appdata; // macOS/Linux profile root
   mkdirSync(join(appdata, "tunnel-client"));
   const file = join(appdata, "tunnel-client", "teste.yaml");
   const node = "C:/Program Files/nodejs/node.exe";
