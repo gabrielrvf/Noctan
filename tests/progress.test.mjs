@@ -15,3 +15,6 @@ test("run progress is in the chat, expandable and tied to actual events",()=>{
 test("Medium label is valid unicode",()=>{
  assert.match(src,/M\\u00e9dio|Médio/);
 });
+test("completed stream reloads the persisted conversation before returning idle",()=>{
+  assert.match(src,/setRunning\(false\);\s*await loadSession\(streamSessionId\)/);
+});

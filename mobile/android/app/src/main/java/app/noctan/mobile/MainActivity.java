@@ -59,13 +59,6 @@ public class MainActivity extends Activity {
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
                 intent.setType("*/*");
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                        "image/*", "application/pdf", "text/*", "application/json",
-                        "text/csv",
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                });
                 startActivityForResult(intent, FILE_CHOOSER);
                 return true;
             }

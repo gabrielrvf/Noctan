@@ -5,7 +5,7 @@ const app=readFileSync(new URL("../public/app.js",import.meta.url),"utf8");
 const server=readFileSync(new URL("../server.mjs",import.meta.url),"utf8");
 test("sent images leave composer and remain as thumbnails",()=>{
   assert.match(app,/messageAttachmentGallery/);
-  assert.match(app,/message\("user", prompt \|\| "Imagem anexada", attachments\)/);
+  assert.match(app,/message\("user", prompt \|\| "Arquivo anexado", attachments\)/);
   assert.match(app,/state\.attachments = \[\];\s*renderAttachments\(\)/);
 });
 test("saved attachments have a safe image endpoint",()=>{

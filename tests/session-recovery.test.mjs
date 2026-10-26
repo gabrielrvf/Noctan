@@ -32,6 +32,8 @@ test("deleted conversations are tombstoned and legacy migration cannot resurrect
   assert.match(server, /if \(deletedSessions\[id\]\) \{\s*delete merged\[id\]/);
   assert.match(server, /if \(existsSync\(SESSIONS\)\) return/);
   assert.match(server, /if \(deletedSessions\[id\]\) continue/);
+  assert.match(server, /withoutDeletedSessions\(mergeSessions\(onDisk,obj\)\)/);
+  assert.match(server, /sessions = withoutDeletedSessions\(mergeSessions\(sessions,await loadJson\(SESSIONS,\{\}\)\)\)/);
 });
 
 test("history merge keeps the most complete snapshot and never drops distinct messages", async () => {

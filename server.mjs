@@ -220,7 +220,7 @@ async function saveJson(path,obj) {
   const taken=true;
   try {
     const onDisk=await loadJson(SESSIONS,{});
-    const merged=mergeSessions(onDisk,obj);
+    const merged=withoutDeletedSessions(mergeSessions(onDisk,obj));
     const tmp=SESSIONS+".tmp-"+randomUUID();
     await writeFile(tmp,JSON.stringify(merged,null,2),{mode:0o600});
     await replaceWithRetry(tmp,SESSIONS);
@@ -230,13 +230,19 @@ async function saveJson(path,obj) {
   }
 }
 
+function withoutDeletedSessions(store) {
+  const filtered = { ...(store || {}) };
+  for (const id of Object.keys(deletedSessions || {})) delete filtered[id];
+  return filtered;
+}
+
 async function deleteSessionById(id) {
   if (!id || active.has(id)) throw Error("Não é possível apagar uma conversa em execução.");
   await mkdir(dirname(SESSIONS), { recursive: true });
   const lock = await takeSessionsLock();
   const taken = true;
   try {
-    const onDisk = await loadJson(SESSIONS, {});
+    const onDisk = withoutDeletedSessions(await loadJson(SESSIONS, {}));
     if (!onDisk[id] && !sessions[id]) return false;
     deletedSessions[id] = new Date().toISOString();
     await saveJson(DELETED_SESSIONS, deletedSessions);
@@ -281,7 +287,7 @@ async function editSessionUserMessage(id, index, text) {
   return { session, index };
 }
 
-async function saveImageAttachments(items) {
+async function saveAttachments(items) {
   const attachments = Array.isArray(items) ? items.slice(0, 5) : [];
   const saved = [];
   if (!attachments.length) return saved;
@@ -300,13 +306,38 @@ async function saveImageAttachments(items) {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":"xlsx",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation":"pptx"
     }[mime];
-    const fromName = String(item?.name || "").toLowerCase().match(/.([a-z0-9]{1,8})$/)?.[1];
+    const fromName = String(item?.name || "").toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1];
     const ext = mimeExt || fromName || "bin";
     const path = join(ATTACHMENTS, randomUUID() + "." + ext);
     await writeFile(path, bytes, { mode: 0o600 });
     saved.push(path);
   }
   return saved;
+}
+function updateSessionTaskList(session, toolName, input, toolUseId) {
+  const name = String(toolName || "").toLowerCase();
+  const current = Array.isArray(session.taskList) ? [...session.taskList] : [];
+  if (name === "todowrite" && Array.isArray(input?.todos)) {
+    session.taskList = input.todos.map((task, index) => ({
+      id: String(task.id || index + 1),
+      text: String(task.content || task.subject || "Tarefa"),
+      activeText: String(task.activeForm || task.content || task.subject || "Em andamento"),
+      status: ["completed", "in_progress", "pending"].includes(task.status) ? task.status : "pending",
+    }));
+    return session.taskList;
+  }
+  if (name === "taskcreate") {
+    current.push({ id: String(input?.taskId || toolUseId || current.length + 1), text: String(input?.subject || input?.description || "Tarefa"), activeText: String(input?.activeForm || input?.subject || "Em andamento"), status: "pending" });
+    session.taskList = current;
+    return current;
+  }
+  if (name === "taskupdate") {
+    const index = current.findIndex((task) => String(task.id) === String(input?.taskId || ""));
+    if (index >= 0) current[index] = { ...current[index], ...(input?.subject ? { text: String(input.subject) } : {}), ...(input?.activeForm ? { activeText: String(input.activeForm) } : {}), ...(input?.status ? { status: String(input.status) } : {}) };
+    session.taskList = current;
+    return current;
+  }
+  return null;
 }
 async function pushLiveFollowUp(body) {
   const id = String(body.sessionId || "");
@@ -315,7 +346,7 @@ async function pushLiveFollowUp(body) {
   if (running.provider !== "anthropic") throw Error("Follow-up ao vivo está disponível para o Claude.");
 
   const text = String(body.prompt || "").trim();
-  const savedAttachments = await saveImageAttachments(body.attachments);
+  const savedAttachments = await saveAttachments(body.attachments);
   if ((!text && !savedAttachments.length) || text.length > 40000)
     throw Error("Mensagem vazia ou muito longa.");
 
@@ -326,7 +357,7 @@ async function pushLiveFollowUp(body) {
   running.segmentBreakRequested = true;
   const item = {
     role: "user",
-    text: text || "Imagem anexada",
+    text: text || "Arquivo anexado",
     attachments: savedAttachments.map((path) => basename(path)),
     provider: "anthropic",
     liveFollowUp: true,
@@ -366,7 +397,7 @@ async function pushLiveFollowUp(body) {
   if (running.res) {
     send(running.res, "notice", {
       text: savedAttachments.length
-        ? "Nova mensagem com imagem recebida durante a execução."
+        ? "Nova mensagem com arquivo recebida durante a execução."
         : "Nova mensagem recebida durante a execução.",
       kind: "follow-up",
     });
@@ -704,25 +735,11 @@ async function runAgent(req, res) {
   if ((!originalPrompt && !attachments.length) || originalPrompt.length > 40000)
     return json(res, 400, { error: "Mensagem vazia ou muito longa." });
   const savedAttachments = [];
-  if (attachments.length) {
-    await mkdir(ATTACHMENTS, { recursive: true });
-    for (const item of attachments) {
-      const match = String(item?.dataUrl || "").match(
-        /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/,
-      );
-      if (!match) throw Error("Formato de imagem não permitido.");
-      const bytes = Buffer.from(match[2], "base64");
-      if (bytes.length > 8_000_000) throw Error("Imagem maior que 8 MB.");
-      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[match[1]];
-      const path = join(ATTACHMENTS, `${randomUUID()}.${ext}`);
-      await writeFile(path, bytes, { mode: 0o600 });
-      savedAttachments.push(path);
-    }
-  }
+  savedAttachments.push(...await saveAttachments(attachments));
   const prompt = [
-    normalizeChromeCommand(originalPrompt || "Analise as imagens anexadas."),
+    normalizeChromeCommand(originalPrompt || "Analise os arquivos anexados."),
     savedAttachments.length
-      ? `\nImagens anexadas pelo usuário (use a ferramenta Read para visualizá-las):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
+      ? `\nArquivos anexados pelo usuário (use as ferramentas disponíveis para lê-los ou inspecioná-los):\n${savedAttachments.map((path) => `- ${path}`).join("\n")}`
       : "",
   ].join("");
   sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
@@ -737,7 +754,7 @@ async function runAgent(req, res) {
   let agentTargetId = typeof body.agentTargetId === "string" ? body.agentTargetId.trim() : "";
   const s = sessions[id] || {
     id,
-    title: (originalPrompt || "Imagem anexada").slice(0, 65),
+    title: (originalPrompt || "Arquivo anexado").slice(0, 65),
     createdAt: new Date().toISOString(),
     messages: [],
     provider,
@@ -766,7 +783,7 @@ async function runAgent(req, res) {
   const agentPromptText = resumeInterrupted ? String(s.inFlight?.originalPrompt || originalPrompt) : originalPrompt;
   if (!replayingEdit && !resumeInterrupted && !agentTargetId) s.messages.push({
     role: "user",
-    text: originalPrompt || "Imagem anexada",
+    text: originalPrompt || "Arquivo anexado",
     attachments: savedAttachments.map((path) => basename(path)),
     provider,
     at: new Date().toISOString(),
@@ -883,7 +900,7 @@ async function runAgent(req, res) {
         preset: "claude_code",
         append:
           config.systemInstructions +
-          "\nFollow the project instructions and persistent memory files. Never print secrets.",
+          "\nFollow the project instructions and persistent memory files. Never print secrets. For work with two or more concrete steps, create and maintain a task list with the available TodoWrite or TaskCreate/TaskUpdate tools so the user can follow progress live.",
       },
       additionalDirectories: extra,
       abortController: ctrl,
@@ -1055,8 +1072,15 @@ async function runAgent(req, res) {
             finalText += b.text + "\n";
             send(res, "text", { text: b.text });
             await persistAssistant();
-          } else if (b.type === "tool_use")
+          } else if (b.type === "tool_use") {
+            const taskList = updateSessionTaskList(s, b.name, b.input, b.id);
+            if (taskList) {
+              sessions[id] = s;
+              await saveJson(SESSIONS, sessions);
+              send(res, "tasks", { tasks: taskList });
+            }
             send(res, "tool", { name: b.name, input: redact(b.input) });
+          }
         }
       } else if (m.type === "result") {
         if (m.is_error && opts.resume && !retriedMissingSession && !finalText.trim() && isMissingClaudeSessionError(m.result)) {
@@ -1326,8 +1350,7 @@ await mkdir(DATA, { recursive: true });
 deletedSessions = await loadJson(DELETED_SESSIONS, {});
 await migrateLegacyData();
 config = cleanConfig(await loadJson(CONFIG, defaults));
-sessions = await loadJson(SESSIONS, {});
-for (const id of Object.keys(deletedSessions)) delete sessions[id];
+sessions = withoutDeletedSessions(await loadJson(SESSIONS, {}));
 for (const session of Object.values(sessions)) {
   if (Array.isArray(session?.messages)) session.messages = mergeMessageLists(session.messages);
 }
@@ -1408,7 +1431,7 @@ const server = http.createServer(async (req, res) => {
       const file = join(ATTACHMENTS, name);
       if (!existsSync(file)) return json(res, 404, { error: "Anexo não encontrado" });
       const ext = name.toLowerCase().split(".").pop();
-      const type = ({png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif"})[ext] || "application/octet-stream";
+      const type = ({png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif",pdf:"application/pdf",txt:"text/plain; charset=utf-8",md:"text/markdown; charset=utf-8",json:"application/json; charset=utf-8",csv:"text/csv; charset=utf-8",zip:"application/zip",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation"})[ext] || "application/octet-stream";
       res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff" });
       return res.end(await readFile(file));
     }
@@ -1419,7 +1442,7 @@ const server = http.createServer(async (req, res) => {
         sessionCount: Object.keys(sessions).length,
         bootId: BOOT_ID,
       });
-    if (req.method === "GET" && path.startsWith("/api/sessions")) sessions = mergeSessions(sessions,await loadJson(SESSIONS,{}));
+    if (req.method === "GET" && path.startsWith("/api/sessions")) sessions = withoutDeletedSessions(mergeSessions(sessions,await loadJson(SESSIONS,{})));
     if (req.method === "GET" && path === "/api/sessions-summary")
       return json(res, 200, Object.values(sessions).map((session) => { const view = sessionView(session); delete view.messages; return view; }).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)));
     if (req.method === "GET" && path === "/api/sessions")
@@ -1467,6 +1490,32 @@ const server = http.createServer(async (req, res) => {
         return json(res, 202, { ok: true, agent });
       } catch (error) {
         return json(res, 409, { error: String(error.message || error) });
+      }
+    }
+
+    const generatedImportMatch = path.match(/^\/api\/sessions\/([^/]+)\/import-generated$/);
+    if (req.method === "POST" && generatedImportMatch) {
+      try {
+        const body = await readBody(req);
+        sessions = mergeSessions(sessions, await loadJson(SESSIONS, {}));
+        const id = decodeURIComponent(generatedImportMatch[1]);
+        const session = sessions[id];
+        if (!session) return json(res, 404, { error: "Conversa não encontrada" });
+        const imported = await importGeneratedImages({ evidence: body.evidence, workspace: config.workspace, attachmentsDir: ATTACHMENTS });
+        if (imported.length) {
+          let assistant = [...(session.messages || [])].reverse().find((item) => item.role === "assistant");
+          if (!assistant) {
+            assistant = { role: "assistant", text: "Imagens geradas", provider: session.provider || "anthropic", at: new Date().toISOString() };
+            session.messages.push(assistant);
+          }
+          assistant.attachments = [...new Set([...(assistant.attachments || []), ...imported])];
+          session.updatedAt = new Date().toISOString();
+          sessions[id] = session;
+          await saveJson(SESSIONS, sessions);
+        }
+        return json(res, 200, { ok: true, attachments: imported });
+      } catch (error) {
+        return json(res, 400, { error: String(error.message || error) });
       }
     }
 

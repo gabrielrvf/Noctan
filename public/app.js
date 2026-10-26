@@ -203,7 +203,7 @@ function message(role, text, attachments = [], messageIndex = null) {
     body.className = "messageText";
     renderMarkdown(body, text);
     e.append(body);
-    appendMessageAttachments(e, attachments, "Imagem gerada");
+    appendMessageAttachments(e, attachments, "Arquivo gerado");
   }
   else {
     const body = document.createElement("div");
@@ -220,7 +220,7 @@ function message(role, text, attachments = [], messageIndex = null) {
       edit.onclick = (event) => { event.stopPropagation(); editUserMessage(messageIndex, text); };
       e.append(edit);
     }
-    appendMessageAttachments(e, attachments, "Imagem enviada");
+    appendMessageAttachments(e, attachments, "Arquivo enviado");
   }
   $("chat").append(e);
   $("chat").scrollTop = $("chat").scrollHeight;
@@ -236,13 +236,26 @@ function appendMessageAttachments(element, attachments, altText) {
     const name = typeof item === "string" ? item : String(item?.name || "");
     const src = typeof item === "string" ? "/api/attachments/" + encodeURIComponent(item) : String(item?.dataUrl || item?.src || "");
     if (!src) continue;
-    const image = document.createElement("img");
-    image.src = src;
-    image.alt = name || altText;
-    image.title = "Clique para visualizar";
-    image.loading = "lazy";
-    image.onclick = () => openAttachmentPreview({ name, dataUrl: src });
-    gallery.append(image);
+    const mime = typeof item === "object" ? String(item?.type || "") : "";
+    const isImage = mime.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(name);
+    if (isImage) {
+      const image = document.createElement("img");
+      image.src = src;
+      image.alt = name || altText;
+      image.title = "Clique para visualizar";
+      image.loading = "lazy";
+      image.onclick = () => openAttachmentPreview({ name, dataUrl: src });
+      gallery.append(image);
+    } else {
+      const link = document.createElement("a");
+      link.className = "messageFileAttachment";
+      link.href = src;
+      link.download = name || "arquivo";
+      link.title = "Baixar arquivo";
+      const extension = (name.split(".").pop() || "FILE").toUpperCase().slice(0, 8);
+      link.innerHTML = `<span>${escapeHtml(extension)}</span><strong>${escapeHtml(name || altText)}</strong>`;
+      gallery.append(link);
+    }
   }
   element.append(gallery);
 }
@@ -274,12 +287,22 @@ function openAttachmentPreview(item) {
     const img = document.createElement("img");
     img.className = "attachmentPreviewImage";
     img.alt = "Pré-visualização da imagem";
-    dialog.append(close, img);
+    const controls = document.createElement("div");
+    controls.className = "attachmentPreviewControls";
+    for (const [label, delta] of [["−", -0.25], ["100%", 0], ["+", 0.25]]) {
+      const button = document.createElement("button"); button.type="button"; button.textContent=label; button.dataset.zoom=String(delta); controls.append(button);
+    }
+    dialog.append(close, controls, img);
     close.onclick = () => dialog.close();
     dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+    const applyZoom = (next) => { dialog.imageScale=Math.min(5,Math.max(.25,next)); img.style.transform=`scale(${dialog.imageScale})`; controls.children[1].textContent=Math.round(dialog.imageScale*100)+"%"; };
+    controls.onclick = (event) => { const delta=Number(event.target?.dataset?.zoom); if(Number.isNaN(delta))return; applyZoom(delta===0?1:(dialog.imageScale||1)+delta); };
+    dialog.addEventListener("wheel", (event) => { event.preventDefault(); applyZoom((dialog.imageScale||1)+(event.deltaY<0?.25:-.25)); }, { passive:false });
+    img.ondblclick=()=>applyZoom((dialog.imageScale||1)===1?2:1);
     document.body.append(dialog);
   }
   const img = dialog.querySelector(".attachmentPreviewImage");
+  dialog.imageScale=1; img.style.transform="scale(1)"; dialog.querySelector(".attachmentPreviewControls button:nth-child(2)").textContent="100%";
   img.src = item.dataUrl;
   img.alt = item.name || "Imagem anexada";
   dialog.showModal();
@@ -290,33 +313,39 @@ function renderAttachments() {
   for (const [index, item] of state.attachments.entries()) {
     const card = document.createElement("div");
     card.className = "attachmentCard";
-    const image = document.createElement("img");
-    image.src = item.dataUrl;
-    image.alt = item.name;
-    image.title = "Clique para visualizar";
-    image.tabIndex = 0;
-    image.onclick = () => openAttachmentPreview(item);
-    image.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openAttachmentPreview(item); } };
+    let preview;
+    if (String(item.type || "").startsWith("image/")) {
+      preview = document.createElement("img");
+      preview.src = item.dataUrl;
+      preview.alt = item.name;
+      preview.title = "Clique para visualizar";
+      preview.tabIndex = 0;
+      preview.onclick = () => openAttachmentPreview(item);
+      preview.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openAttachmentPreview(item); } };
+    } else {
+      preview = document.createElement("div");
+      preview.className = "attachmentFile";
+      preview.textContent = (item.name.split(".").pop() || "FILE").toUpperCase().slice(0, 8);
+      preview.title = item.name;
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "\u00d7";
-    remove.title = "Remover imagem";
+    remove.title = "Remover arquivo";
     remove.onclick = () => {
       state.attachments.splice(index, 1);
       renderAttachments();
     };
-    card.append(image, remove);
+    card.append(preview, remove);
     tray.append(card);
   }
   show(tray, state.attachments.length > 0);
 }
 
-async function addImages(files) {
-  const accepted = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+async function addFiles(files) {
   for (const file of [...files].slice(0, 5 - state.attachments.length)) {
-    if (!accepted.includes(file.type)) continue;
-    if (file.size > 8_000_000) {
-      message("system", file.name + " \u00e9 maior que 8 MB.");
+    if (file.size > 20_000_000) {
+      message("system", file.name + " \u00e9 maior que 20 MB.");
       continue;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -325,7 +354,7 @@ async function addImages(files) {
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
-    state.attachments.push({ name: file.name || "imagem", dataUrl });
+    state.attachments.push({ name: file.name || "arquivo", type: file.type || "application/octet-stream", dataUrl });
   }
   renderAttachments();
 }
@@ -645,11 +674,13 @@ async function loadSession(id) {
     // ponytail: aprovação pedida em segundo plano só aparece se a execução for reaberta pelo servidor; hoje fica aguardando.
     $("runStatus").textContent = "Executando em segundo plano...";
     restoreLiveProgress(id);
+    renderProgressTasks(s.taskList);
     const poll = async () => {
       if (state.current !== id || state.running) return;
       const r = await request("/api/sessions/" + id).catch(() => null);
       if (state.current !== id || state.running) return;
       state.remoteRunning = Boolean(r?.liveActive);
+      syncLiveSnapshot(r);
       if (Array.isArray(r?.agents) && document.activeElement?.id !== "agentMessageInput") {
         const before=JSON.stringify(state.agents.map((agent)=>[agent.id,agent.updatedAt,agent.events?.length]));
         const after=JSON.stringify(r.agents.map((agent)=>[agent.id,agent.updatedAt,agent.events?.length]));
@@ -791,10 +822,11 @@ function restoreLiveProgress(sessionId) {
   icon.className="agentSpinner"; icon.src="/noctan-mark.png"; icon.alt="";
   const headline=document.createElement("span");
   summary.append(icon,headline);
+  const tasks=document.createElement("div"); tasks.className="agentTaskList"; tasks.hidden=true;
   const log=document.createElement("div"); log.className="agentProgressLog";
-  details.append(summary,log);
+  details.append(summary,tasks,log);
   $("chat").append(details);
-  progressUI={details,summary,headline,log,realStatus:meta.realStatus || ""};
+  progressUI={details,summary,headline,tasks,log,realStatus:meta.realStatus || "",lastSnapshot:""};
   for (const event of meta.events) {
     const item=document.createElement("div");
     item.textContent=new Date(event.at).toLocaleTimeString("pt-BR")+"  -  "+event.text;
@@ -839,11 +871,13 @@ function beginProgress(sessionId = state.current){
   icon.alt="";
   const headline=document.createElement("span");
   summary.append(icon,headline);
+  const tasks=document.createElement("div");
+  tasks.className="agentTaskList"; tasks.hidden=true;
   const log=document.createElement("div");
   log.className="agentProgressLog";
-  details.append(summary,log);
+  details.append(summary,tasks,log);
   $("chat").append(details);
-  progressUI={details,summary,headline,log,realStatus:""};
+  progressUI={details,summary,headline,tasks,log,realStatus:"",lastSnapshot:""};
   addProgressEvent(
     state.provider === "openai"
       ? "Conectando \u00e0 OpenAI Responses API"
@@ -853,6 +887,36 @@ function beginProgress(sessionId = state.current){
   progressHeadline();
   progressTicker=setInterval(progressHeadline,650);
   $("chat").scrollTop=$("chat").scrollHeight;
+}
+function renderProgressTasks(tasks){
+  if(!progressUI?.tasks)return;
+  progressUI.tasks.replaceChildren();
+  for(const task of Array.isArray(tasks)?tasks:[]){
+    const row=document.createElement("div");
+    const status=task.status==="completed"?"completed":task.status==="in_progress"?"active":"pending";
+    row.className="agentTask "+status;
+    const icon=document.createElement("span"); icon.className="agentTaskIcon"; icon.textContent=status==="completed"?"✓":status==="active"?"◌":"○";
+    const label=document.createElement("span"); label.textContent=status==="active"?(task.activeText||task.text):(task.text||"Tarefa");
+    row.append(icon,label); progressUI.tasks.append(row);
+  }
+  progressUI.tasks.hidden=!progressUI.tasks.childElementCount;
+}
+function syncLiveSnapshot(snapshot){
+  if(!progressUI||!snapshot)return;
+  renderProgressTasks(snapshot.taskList);
+  const latest=[...(snapshot.messages||[])].reverse().find((item)=>item.role==="assistant"&&String(item.text||"").trim());
+  const status=String(latest?.text||"").trim().split("\n").filter(Boolean).at(-1)?.replace(/^[-*]\s*/,"").slice(0,180)||"";
+  if(status&&status!==progressUI.lastSnapshot){progressUI.lastSnapshot=status;updateProgress(status);keepProgressLast();}
+}
+function pollLiveSnapshot(id, signal){
+  const poll=async()=>{
+    if(signal?.aborted||state.current!==id)return;
+    const snapshot=await request("/api/sessions/"+encodeURIComponent(id)).catch(()=>null);
+    if(signal?.aborted||state.current!==id)return;
+    syncLiveSnapshot(snapshot);
+    if(snapshot?.liveActive)setTimeout(poll,1500);
+  };
+  setTimeout(poll,1500);
 }
 function addProgressEvent(text){
   if(!progressUI)return;
@@ -988,7 +1052,7 @@ async function send() {
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
     resetPromptNavigation();
     $("prompt").value = "";
-    message("user", prompt || "Imagem anexada", attachments);
+    message("user", prompt || "Arquivo anexado", attachments);
     state.attachments = [];
     renderAttachments();
     assistantSegmentEpoch += 1;
@@ -998,7 +1062,7 @@ async function send() {
         method: "POST",
         body: JSON.stringify({ sessionId: targetSessionId, prompt, attachments }),
       });
-      addProgressEvent(attachments.length ? "Nova mensagem com imagem enviada ao agente durante a execução." : "Nova mensagem enviada ao agente durante a execução.");
+      addProgressEvent(attachments.length ? "Nova mensagem com arquivo enviada ao agente durante a execução." : "Nova mensagem enviada ao agente durante a execução.");
     } catch (error) {
       message("system", error.message);
     }
@@ -1013,9 +1077,9 @@ async function send() {
   renderAttachments();
   if (!state.current) {
     $("chat").replaceChildren();
-    $("conversationTitle").textContent = (prompt || "Imagem anexada").slice(0, 65);
+    $("conversationTitle").textContent = (prompt || "Arquivo anexado").slice(0, 65);
   }
-  if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Imagem anexada", attachments);
+  if (!resumeInterrupted && replayEditIndex === null) message("user", prompt || "Arquivo anexado", attachments);
   setRunning(true);
   const targetMeta = ensureLiveRunMeta(targetSessionId);
   if (targetMeta) { targetMeta.startedAt = Date.now(); targetMeta.events = []; targetMeta.realStatus = ""; targetMeta.active = true; }
@@ -1098,8 +1162,10 @@ async function send() {
             state.current = data.sessionId;
             await refresh();
             updateProgress("Preparando execu\u00e7\u00e3o");
+            pollLiveSnapshot(streamSessionId, ctrl.signal);
           }
         }
+        if (type === "tasks") { if (ownsView()) renderProgressTasks(data.tasks); continue; }
         if (type === "text") {
           recordLiveRunEvent(streamSessionId, "Respondendo");
           if (!ownsView()) continue;
@@ -1162,8 +1228,8 @@ async function send() {
     if (finishedMeta) finishedMeta.active = false;
     if (ctrl.signal.aborted || !ownsView()) return;
     endProgress();
-    await refresh().catch(() => {});
     setRunning(false);
+    await loadSession(streamSessionId).catch(() => refresh().catch(() => {}));
     show($("pending"), false);
   }
 }
@@ -1526,7 +1592,7 @@ $("new").onclick = newSession;
 $("send").onclick = send;
 $("attachImage").onclick = () => $("imageInput").click();
 $("imageInput").onchange = async (event) => {
-  await addImages(event.target.files);
+  await addFiles(event.target.files);
   event.target.value = "";
 };
 $("prompt").addEventListener("paste", async (event) => {
@@ -1535,7 +1601,7 @@ $("prompt").addEventListener("paste", async (event) => {
   );
   if (images.length) {
     event.preventDefault();
-    await addImages(images);
+    await addFiles(images);
   }
 });
 const composer = document.querySelector(".composer");
@@ -1552,7 +1618,7 @@ for (const name of ["dragleave", "drop"]) {
   });
 }
 composer.addEventListener("drop", async (event) => {
-  await addImages(event.dataTransfer.files);
+  await addFiles(event.dataTransfer.files);
 });
 
 let microphoneStream = null;

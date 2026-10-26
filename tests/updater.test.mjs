@@ -75,6 +75,12 @@ test('legacy configuration migration preserves workspace and protected keys', ()
   assert.match(server, /copyFile\(source, target\)/);
 });
 
+test('desktop stores conversations in the active Electron profile', () => {
+  const desktop = readFileSync(new URL('../desktop.mjs', import.meta.url), 'utf8');
+  assert.match(desktop, /NOCTAN_DATA_DIR = join\(app\.getPath\("userData"\), "data"\)/);
+  assert.doesNotMatch(desktop, /app\.getPath\("appData"\), "Noctan", "data"/);
+});
+
 test('PC Controller is green only when local (if configured) AND tunnel (if key configured) are connected', () => {
   assert.match(app, /const connected = \(localConnected \|\| !needLocal\) && \(tunnelConnected \|\| !needTunnel\)/);
   assert.match(app, /const failed = !busy && !connected/);

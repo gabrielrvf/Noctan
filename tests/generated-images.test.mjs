@@ -25,9 +25,39 @@ test("generated images are copied into chat attachments without moving the sourc
   assert.deepEqual(await readFile(join(attachmentsDir, saved[0])), Buffer.from([137, 80, 78, 71]));
 });
 
+test("images linked by a generated local HTML preview are imported into chat", async () => {
+  const root = await mkdtemp(join(tmpdir(), "noctan-preview-"));
+  const attachmentsDir = join(root, "attachments");
+  const source = join(root, "preview-image.png");
+  const preview = join(root, "preview.html");
+  await writeFile(source, Buffer.from([137, 80, 78, 71]));
+  await writeFile(preview, '<img src="preview-image.png">');
+  const saved = await importGeneratedImages({ evidence: [`Abra ${preview}`], workspace: root, attachmentsDir });
+  assert.equal(saved.length, 1);
+  assert.deepEqual(await readFile(join(attachmentsDir, saved[0])), Buffer.from([137, 80, 78, 71]));
+});
+
+test("images beside a data-url HTML preview are imported into chat", async () => {
+  const root = await mkdtemp(join(tmpdir(), "noctan-data-preview-"));
+  const attachmentsDir = join(root, "attachments");
+  const source = join(root, "generated-output.png");
+  const preview = join(root, "preview.html");
+  await writeFile(source, Buffer.from([137, 80, 78, 71]));
+  await writeFile(preview, '<img src="data:image/png;base64,iVBORw0KGgo=">');
+  const saved = await importGeneratedImages({ evidence: [`Abra ${preview}`], workspace: root, attachmentsDir });
+  assert.equal(saved.length, 1);
+  assert.deepEqual(await readFile(join(attachmentsDir, saved[0])), Buffer.from([137, 80, 78, 71]));
+});
+
 test("desktop and Android render assistant image attachments inline", async () => {
   const desktop = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const mobile = await readFile(new URL("../mobile/android/app/src/main/assets/index.html", import.meta.url), "utf8");
-  assert.match(desktop, /appendMessageAttachments\(e, attachments, "Imagem gerada"\)/);
+  assert.match(desktop, /appendMessageAttachments\(e, attachments, "Arquivo gerado"\)/);
   assert.match(mobile, /role==="assistant"\?"Imagem gerada":"Imagem enviada"/);
+});
+
+test("a completed conversation can recover generated images from explicit evidence", async () => {
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /\/import-generated\$/);
+  assert.match(server, /assistant\.attachments = \[\.\.\.new Set/);
 });

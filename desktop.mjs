@@ -204,7 +204,9 @@ async function waitForServer() {
 }
 
 async function createWindow(targetUrl = APP_URL) {
-  process.env.NOCTAN_DATA_DIR = join(app.getPath("appData"), "Noctan", "data");
+  // Use the exact Electron profile shown to the user. This avoids switching
+  // stores when an installation has a customized profile path.
+  process.env.NOCTAN_DATA_DIR = join(app.getPath("userData"), "data");
   const serverModule = await import("./server.mjs");
   await waitForServer();
   await import("./mobile-gateway.mjs");

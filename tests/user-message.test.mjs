@@ -8,7 +8,7 @@ test('user text and sent image thumbnails render separately',()=>{
   assert.match(js,/body\.textContent = text/);
   assert.match(js,/messageAttachmentGallery/);
   assert.match(js,/image\.src = src/);
-  assert.match(js,/message\("user", prompt \|\| "Imagem anexada", attachments\)/);
+  assert.match(js,/message\("user", prompt \|\| "Arquivo anexado", attachments\)/);
   assert.match(js,/Array\.isArray\(m\.attachments\) \? m\.attachments : \[\]/);
   assert.match(js,/messageEdit/);
 });
