@@ -17,7 +17,6 @@ export APPLE_API_KEY=~/.appstoreconnect/private_keys/AuthKey_$APPLE_API_KEY_ID.p
 export GH_TOKEN="$(gh auth token -u $GH_ACCOUNT)"
 
 cd "$(dirname "$0")/.."
-[[ -z "$(git status --porcelain --untracked-files=no)" ]] || { echo "Há mudanças não commitadas; commite ou descarte antes."; exit 1; }
 security find-identity -v -p codesigning | grep -q "Developer ID Application" || { echo "Certificado Developer ID não encontrado no Acesso às Chaves."; exit 1; }
 [[ -f $APPLE_API_KEY ]] || { echo "Chave $APPLE_API_KEY não encontrada."; exit 1; }
 
@@ -26,13 +25,14 @@ VERSION=${TAG#v}
 git fetch -q origin --tags
 git cat-file -e "$TAG:build/entitlements.mac.plist" 2>/dev/null || { echo "$TAG é anterior à assinatura Developer ID; use uma release mais nova."; exit 1; }
 
-BACK=$(git rev-parse --abbrev-ref HEAD)
-trap 'git checkout -q -- package.json package-lock.json; git checkout -q "$BACK"' EXIT
-git checkout -q --detach "$TAG"
+# Build the tag in a throwaway worktree so this checkout (and this script) stay untouched.
+WORK=$(mktemp -d -t noctan-mac)
+trap 'git worktree remove --force "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
+git worktree add -q --detach "$WORK" "$TAG"
+cd "$WORK"
 
 npm ci
 npm version --allow-same-version --no-git-tag-version "$VERSION" >/dev/null
-rm -rf dist
 npm run dist:mac -- --arm64 --publish never
 
 APP=dist/mac-arm64/Noctan.app
