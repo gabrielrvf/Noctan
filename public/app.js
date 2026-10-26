@@ -134,6 +134,15 @@ function inlineMarkdown(value) {
       '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
     );
 }
+const codeBlockHtml = (code) => `<div class="codeBlock"><button type="button" class="codeCopy">Copiar</button><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`;
+document.addEventListener("click", (event) => {
+  const button = event.target.closest?.(".codeCopy");
+  if (!button) return;
+  navigator.clipboard.writeText(button.nextElementSibling.textContent).then(() => {
+    button.textContent = "Copiado";
+    setTimeout(() => { button.textContent = "Copiar"; }, 1500);
+  }).catch((error) => note(error.message));
+});
 function renderMarkdown(element, text) {
   const lines = text.replace(/\r/g, "").split("\n");
   let html = "";
@@ -156,7 +165,7 @@ function renderMarkdown(element, text) {
       closeList();
       if (code === null) code = [];
       else {
-        html += `<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`;
+        html += codeBlockHtml(code);
         code = null;
       }
       continue;
@@ -188,7 +197,7 @@ function renderMarkdown(element, text) {
     } else paragraph.push(line);
   }
   if (code !== null)
-    html += `<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`;
+    html += codeBlockHtml(code);
   flushParagraph();
   closeList();
   element.innerHTML = html;

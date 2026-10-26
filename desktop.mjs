@@ -266,8 +266,10 @@ async function createWindow(targetUrl = APP_URL) {
 
   const localOrigin = new URL(APP_URL).origin;
   const localMediaRequest = (webContents, permission, requestingOrigin, details = {}) => {
-    if (permission !== "media") return false;
     const origin = String(requestingOrigin || details.requestingUrl || "");
+    // Botão "Copiar" dos blocos de código grava na área de transferência.
+    if (permission === "clipboard-sanitized-write") return origin.startsWith(localOrigin + "/") || origin === localOrigin;
+    if (permission !== "media") return false;
     const types = details.mediaTypes || [];
     return origin.startsWith(localOrigin + "/") || origin === localOrigin
       ? (!types.length || (types.includes("audio") && !types.includes("video")))
