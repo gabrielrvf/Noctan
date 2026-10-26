@@ -65,3 +65,14 @@ test("Android APK checks the latest GitHub release and opens the system installe
   assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
   assert.match(manifest, /android:launchMode="singleTop"/);
 });
+
+test("Android keeps the working pairing and shows its version", async () => {
+  const [mobile, activity] = await Promise.all([
+    read("mobile/android/app/src/main/assets/index.html"),
+    read("mobile/android/app/src/main/java/app/noctan/mobile/MainActivity.java"),
+  ]);
+  assert.match(mobile, /await refreshStatus\(\);rememberConnection\(\);await loadSessions\(false\)/);
+  assert.match(mobile, /await refreshStatus\(\);rememberConnection\(\);await loadSessions\(true\)/);
+  assert.match(mobile, /\$\("appVersion"\)\.textContent="v"\+window\.NoctanNative\.getVersion\(\)/);
+  assert.match(activity, /public String getVersion\(\) \{ return BuildConfig\.VERSION_NAME; \}/);
+});

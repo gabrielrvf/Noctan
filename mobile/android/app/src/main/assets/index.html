@@ -36,7 +36,7 @@ dialog{width:min(92vw,680px);border:1px solid #333;border-radius:14px;background
   <button id="newChat" class="newButton">+ Novo</button>
   <div class="section">RECENTES</div>
   <div id="sessions" class="sessions"></div>
-  <div class="sidebarbottom"><div class="profileDot">N</div><div class="profileCopy"><strong>Noctan</strong><small>assistente local</small></div><div id="connection" class="connection">• Verificando conexão...</div></div>
+  <div class="sidebarbottom"><div class="profileDot">N</div><div class="profileCopy"><strong>Noctan</strong><small id="appVersion">assistente local</small></div><div id="connection" class="connection">• Verificando conexão...</div></div>
 </aside>
 <section class="main">
 <div id="pullRefresh" class="pullRefresh"><img src="file:///android_res/drawable/noctan_mark.png" alt=""><span>Solte para atualizar</span></div>
@@ -203,8 +203,11 @@ $("modelBtn").onclick=()=>$("modelDialog").showModal();$("closeModel").onclick=(
 $("providerSelect").onchange=syncProviderModels;
 $("closePreview").onclick=()=>$("previewDialog").close();$("previewDialog").onclick=e=>{if(e.target===$("previewDialog"))$("previewDialog").close()};let previewScale=1;function setPreviewScale(next){previewScale=Math.min(5,Math.max(.25,next));$("previewImage").style.transform="scale("+previewScale+")";$("zoomReset").textContent=Math.round(previewScale*100)+"%"}$("zoomOut").onclick=()=>setPreviewScale(previewScale-.25);$("zoomIn").onclick=()=>setPreviewScale(previewScale+.25);$("zoomReset").onclick=()=>setPreviewScale(1);$("previewImage").ondblclick=()=>setPreviewScale(previewScale===1?2:1);
 async function tryDefaultConnection(){if(!DEFAULT_BASE||DEFAULT_BASE===state.base)return false;const previousBase=state.base,previousToken=state.token;state.base=DEFAULT_BASE.replace(/\/$/,"");state.token=DEFAULT_TOKEN;try{await refreshStatus();localStorage.setItem("base",state.base);localStorage.setItem("token",state.token);return true}catch{state.base=previousBase;state.token=previousToken;return false}}
-async function boot(){setStatus(false,"Conectando…");try{await refreshStatus();await loadSessions(false)}catch(e){if(await tryDefaultConnection()){await loadSessions(false);return}setStatus(false,"PC não encontrado");$("chat").innerHTML='<div class="welcome"><img src="file:///android_res/drawable/noctan_mark.png"><h2>PC não encontrado</h2><p>Puxe para baixo para tentar novamente ou abra ⚙ se o endereço do PC mudou.</p></div>'}}
-async function resyncAfterResume(){state.streaming=false;state.assistant=null;setStatus(false,"Procurando o PC…",true);try{await refreshStatus();await loadSessions(true);return true}catch(e){if(await tryDefaultConnection()){await loadSessions(true);return true}setStatus(false,"PC não encontrado");return false}}
+// Guarda o pareamento que funcionou: um APK novo da Release (sem pareamento embutido) continua achando o PC.
+function rememberConnection(){if(state.base&&state.token){localStorage.setItem("base",state.base);localStorage.setItem("token",state.token)}}
+if(window.NoctanNative&&window.NoctanNative.getVersion)$("appVersion").textContent="v"+window.NoctanNative.getVersion();
+async function boot(){setStatus(false,"Conectando…");try{await refreshStatus();rememberConnection();await loadSessions(false)}catch(e){if(await tryDefaultConnection()){await loadSessions(false);return}setStatus(false,"PC não encontrado");$("chat").innerHTML='<div class="welcome"><img src="file:///android_res/drawable/noctan_mark.png"><h2>PC não encontrado</h2><p>Puxe para baixo para tentar novamente ou abra ⚙ se o endereço do PC mudou.</p></div>'}}
+async function resyncAfterResume(){state.streaming=false;state.assistant=null;setStatus(false,"Procurando o PC…",true);try{await refreshStatus();rememberConnection();await loadSessions(true);return true}catch(e){if(await tryDefaultConnection()){await loadSessions(true);return true}setStatus(false,"PC não encontrado");return false}}
 let pullStart=0,pullActive=false,pullBusy=false;const pull=$("pullRefresh"),chat=$("chat");
 chat.addEventListener("touchstart",e=>{if(chat.scrollTop<=0&&!pullBusy){pullStart=e.touches[0].clientY;pullActive=true}},{passive:true});
 chat.addEventListener("touchmove",e=>{if(!pullActive)return;const distance=e.touches[0].clientY-pullStart;if(distance>24)pull.classList.add("show");pull.querySelector("span").textContent=distance>78?"Solte para atualizar":"Puxe para atualizar"},{passive:true});

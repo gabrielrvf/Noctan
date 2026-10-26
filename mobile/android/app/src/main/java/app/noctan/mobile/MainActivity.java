@@ -234,6 +234,9 @@ public class MainActivity extends Activity {
         public String getDefaultToken() { return BuildConfig.MOBILE_DEFAULT_TOKEN; }
 
         @JavascriptInterface
+        public String getVersion() { return BuildConfig.VERSION_NAME; }
+
+        @JavascriptInterface
         public void startVoice() {
             runOnUiThread(() -> {
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
