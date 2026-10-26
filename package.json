@@ -76,9 +76,19 @@
       "artifactName": "Noctan-Setup-${version}.${ext}"
     },
     "mac": {
-      "icon": "public/noctan-mark.png",
-      "target": ["dmg", "zip"],
-      "artifactName": "Noctan-${version}-${arch}.${ext}"
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Noctan-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O Noctan usa o microfone para ditado por voz."
+      }
     },
     "nsis": {
       "oneClick": false,
@@ -102,21 +112,7 @@
         "repo": "Noctan",
         "releaseType": "release"
       }
-    ],
-    "mac": {
-      "icon": "build/icon.icns",
-      "category": "public.app-category.productivity",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "identity": "-",
-      "hardenedRuntime": false,
-      "artifactName": "Noctan-${version}-mac-${arch}.${ext}",
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "O Noctan usa o microfone para ditado por voz."
-      }
-    }
+    ]
   },
   "engines": {
     "node": ">=20"

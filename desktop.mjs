@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain, Notification } from "electron";
 import updaterPackage from "electron-updater";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 // Apps opened from Finder get launchd's bare PATH; MCP servers and CLIs installed
 // through the shell (nvm, ~/.local, Homebrew) only resolve with the login shell's PATH.
@@ -91,11 +91,20 @@ function setUpdateState(patch) {
   broadcastUpdateStatus();
 }
 
+// Squirrel.Mac only installs updates into a Developer ID-signed app; ad-hoc
+// builds (no certificate in CI) keep pointing people to the Releases page.
+function macUpdatesSupported() {
+  const info = spawnSync("codesign", ["-dv", "--verbose=2", process.execPath], { encoding: "utf8" });
+  return /Authority=Developer ID Application/.test(info.stderr || "");
+}
+
 async function setupAutoUpdater() {
+  const updatesBlocked = process.platform === "darwin" && !macUpdatesSupported();
+
   ipcMain.handle("updater:get-status", () => ({ ...updateState }));
 
   ipcMain.handle("updater:check", async () => {
-    if (!app.isPackaged || process.platform === "darwin") return { ...updateState };
+    if (!app.isPackaged || updatesBlocked) return { ...updateState };
     await autoUpdater.checkForUpdates();
     return { ...updateState };
   });
@@ -116,8 +125,7 @@ async function setupAutoUpdater() {
     return;
   }
 
-  // ponytail: Squirrel.Mac only installs Developer ID-signed builds; enable once the mac build is signed + notarized.
-  if (process.platform === "darwin") {
+  if (updatesBlocked) {
     setUpdateState({
       status: "dev",
       message: "No macOS, baixe novas versões pela página de Releases.",
