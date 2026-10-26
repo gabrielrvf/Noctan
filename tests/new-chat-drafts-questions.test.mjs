@@ -52,3 +52,16 @@ test("background shell tasks do not become agents and finished agents stop the p
   assert.match(css, /\.agentsButton\.running\{/);
   assert.doesNotMatch(html, /assistente local/);
 });
+
+test("Android APK checks the latest GitHub release and opens the system installer", async () => {
+  const [activity, manifest] = await Promise.all([
+    read("mobile/android/app/src/main/java/app/noctan/mobile/MainActivity.java"),
+    read("mobile/android/app/src/main/AndroidManifest.xml"),
+  ]);
+  assert.match(activity, /api\.github\.com\/repos\/yanoliveira16\/Noctan\/releases\/latest/);
+  assert.match(activity, /isNewerVersion\(version, BuildConfig\.VERSION_NAME\)/);
+  assert.match(activity, /PackageInstaller\.STATUS_PENDING_USER_ACTION/);
+  assert.doesNotMatch(activity, /\.transferTo\(|\.readAllBytes\(/);
+  assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
+  assert.match(manifest, /android:launchMode="singleTop"/);
+});
