@@ -84,3 +84,10 @@ test("phone loads PC image attachments with the pairing token and stops re-rende
   assert.match(mobile, /fetch\(src,\{headers:authHeaders\(\)\}\)/);
   assert.match(mobile, /if\(sig!==state\.renderSig\|\|\$\("chat"\)\.childElementCount===0\)\{state\.renderSig=sig;renderSession\(s\)\}/);
 });
+
+test("phone hides empty terminal-task agents and only paints Agents purple while one runs", async () => {
+  const mobile = await read("mobile/android/app/src/main/assets/index.html");
+  assert.match(mobile, /state\.agents=\(Array\.isArray\(agents\)\?agents:\[\]\)\.filter\(isRealAgent\)/);
+  assert.match(mobile, /classList\.toggle\("running",state\.agents\.some/);
+  assert.match(mobile, /\.agentsBtn\.running\{/);
+});
