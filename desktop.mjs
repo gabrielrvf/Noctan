@@ -26,6 +26,7 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  checkForUpdatesOnOpen();
 }
 
 function setupTray(iconPath) {
@@ -182,14 +183,23 @@ async function setupAutoUpdater() {
     });
   });
 
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((error) => {
-      setUpdateState({
-        status: "error",
-        message: String(error?.message || error).slice(0, 500),
-      });
+  updaterReady = true;
+  setTimeout(checkForUpdatesOnOpen, 2500);
+}
+
+// Verifica ao iniciar e sempre que a janela volta da bandeja (no máximo a cada 10 min).
+let updaterReady = false;
+let lastUpdateCheck = 0;
+function checkForUpdatesOnOpen() {
+  if (!updaterReady || Date.now() - lastUpdateCheck < 10 * 60000) return;
+  if (["checking", "downloading", "downloaded"].includes(updateState.status)) return;
+  lastUpdateCheck = Date.now();
+  autoUpdater.checkForUpdates().catch((error) => {
+    setUpdateState({
+      status: "error",
+      message: String(error?.message || error).slice(0, 500),
     });
-  }, 2500);
+  });
 }
 
 async function waitForServer() {

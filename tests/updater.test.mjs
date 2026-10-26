@@ -92,3 +92,9 @@ test('PC Controller click shows a spinning Noctan logo until reconnection comple
   assert.match(app, /for \(let attempt = 0; attempt < 20/);
   assert.match(app, /pcReconnectInProgress = false/);
 });
+
+test('update check runs at startup and again when the window comes back from the tray', () => {
+  assert.match(desktop, /setTimeout\(checkForUpdatesOnOpen, 2500\)/);
+  assert.match(desktop, /function showMainWindow\(\) \{[\s\S]*?checkForUpdatesOnOpen\(\);\s*\}/);
+  assert.match(desktop, /Date\.now\(\) - lastUpdateCheck < 10 \* 60000/);
+});
