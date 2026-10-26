@@ -76,3 +76,11 @@ test("Android keeps the working pairing and shows its version", async () => {
   assert.match(mobile, /\$\("appVersion"\)\.textContent="v"\+window\.NoctanNative\.getVersion\(\)/);
   assert.match(activity, /public String getVersion\(\) \{ return BuildConfig\.VERSION_NAME; \}/);
 });
+
+test("phone loads PC image attachments with the pairing token and stops re-rendering every second", async () => {
+  const [mobile, gateway] = await Promise.all([read("mobile/android/app/src/main/assets/index.html"), read("mobile-gateway.mjs")]);
+  assert.match(gateway, /\/\^\\\/api\\\/attachments\\\/\[\^\/\]\+\$\/\.test\(path\)/);
+  assert.match(mobile, /function setImageSource\(img,src\)/);
+  assert.match(mobile, /fetch\(src,\{headers:authHeaders\(\)\}\)/);
+  assert.match(mobile, /if\(sig!==state\.renderSig\|\|\$\("chat"\)\.childElementCount===0\)\{state\.renderSig=sig;renderSession\(s\)\}/);
+});
