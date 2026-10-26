@@ -35,7 +35,8 @@ test("AskUserQuestion becomes a clickable question that answers the agent", asyn
 
 test("code blocks get a copy button that writes to the clipboard", async () => {
   const [app, css, desktop] = await Promise.all([read("public/app.js"), read("public/style.css"), read("desktop.mjs")]);
-  assert.match(app, /class="codeCopy">Copiar<\/button><pre><code>/);
+  assert.match(app, /class="codeCopy" title="Copiar" aria-label="Copiar"><svg[\s\S]*?<\/svg><\/button><pre><code>/);
+  assert.match(css, /\.codeCopy\.copied::before \{\s*content: "Copiado";/);
   assert.match(app, /navigator\.clipboard\.writeText\(button\.nextElementSibling\.textContent\)/);
   assert.doesNotMatch(app, /html \+= `<pre><code>/);
   assert.match(css, /\.codeCopy \{/);

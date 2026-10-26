@@ -430,16 +430,32 @@ h1 {
   position: absolute;
   top: 6px;
   right: 6px;
-  padding: 3px 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px;
   font-size: 11px;
-  border: 1px solid #353535;
+  border: 0;
   border-radius: 6px;
-  background: #1c1c1c;
-  color: #cfcfcf;
+  background: transparent;
+  color: #9d9d9d;
   cursor: pointer;
 }
 .codeCopy:hover {
   background: #2a2a2a;
+  color: #e6e6e6;
+}
+.codeCopy svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.codeCopy.copied::before {
+  content: "Copiado";
 }
 .message.assistant pre {
   overflow: auto;

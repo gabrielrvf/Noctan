@@ -134,13 +134,13 @@ function inlineMarkdown(value) {
       '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
     );
 }
-const codeBlockHtml = (code) => `<div class="codeBlock"><button type="button" class="codeCopy">Copiar</button><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`;
+const codeBlockHtml = (code) => `<div class="codeBlock"><button type="button" class="codeCopy" title="Copiar" aria-label="Copiar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a2 2 0 0 1 2-2h10"/></svg></button><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`;
 document.addEventListener("click", (event) => {
   const button = event.target.closest?.(".codeCopy");
   if (!button) return;
   navigator.clipboard.writeText(button.nextElementSibling.textContent).then(() => {
-    button.textContent = "Copiado";
-    setTimeout(() => { button.textContent = "Copiar"; }, 1500);
+    button.classList.add("copied");
+    setTimeout(() => button.classList.remove("copied"), 1500);
   }).catch((error) => note(error.message));
 });
 function renderMarkdown(element, text) {
