@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { generatedImagePathCandidates, importGeneratedImages } from "../generated-images.mjs";
@@ -47,6 +47,19 @@ test("images beside a data-url HTML preview are imported into chat", async () =>
   const saved = await importGeneratedImages({ evidence: [`Abra ${preview}`], workspace: root, attachmentsDir });
   assert.equal(saved.length, 1);
   assert.deepEqual(await readFile(join(attachmentsDir, saved[0])), Buffer.from([137, 80, 78, 71]));
+});
+
+test("images that already existed before the run are not treated as generated", async () => {
+  const root = await mkdtemp(join(tmpdir(), "noctan-old-image-"));
+  const attachmentsDir = join(root, "attachments");
+  const logo = join(root, "noctan-mark.png");
+  const page = join(root, "index.html");
+  await writeFile(logo, Buffer.from([137, 80, 78, 71]));
+  await writeFile(page, '<img src="/noctan-mark.png">');
+  const old = new Date(Date.now() - 60_000);
+  await utimes(logo, old, old);
+  const saved = await importGeneratedImages({ evidence: [`${page}:96: <div id="pending">`], workspace: root, attachmentsDir, since: Date.now() - 2000 });
+  assert.equal(saved.length, 0);
 });
 
 test("desktop and Android render assistant image attachments inline", async () => {

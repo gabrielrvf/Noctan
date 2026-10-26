@@ -815,6 +815,7 @@ async function runAgent(req, res) {
     spent = 0,
     assistantRecord = null;
   const generatedImageEvidence = [];
+  const runStartedAt = Date.now();
   const persistAssistant = async () => {
     if (agentTargetId) return;
     const running = active.get(id);
@@ -1165,6 +1166,7 @@ async function runAgent(req, res) {
       evidence: generatedImageEvidence,
       workspace: config.workspace,
       attachmentsDir: ATTACHMENTS,
+      since: runStartedAt - 2000,
     });
     if (generatedAttachments.length) {
       if (!assistantRecord) {

@@ -36,7 +36,9 @@ export function generatedImagePathCandidates(value, workspace = "") {
   return [...candidates];
 }
 
-export async function importGeneratedImages({ evidence, workspace, attachmentsDir }) {
+// `since` (ms): só importa arquivos criados/alterados depois disso, para uma imagem
+// que já existia (ex.: o logo ao lado de um index.html lido) não virar "imagem gerada".
+export async function importGeneratedImages({ evidence, workspace, attachmentsDir, since = 0 }) {
   const saved = [];
   const seen = new Set();
   const attachmentRoot = resolve(attachmentsDir);
@@ -70,7 +72,7 @@ export async function importGeneratedImages({ evidence, workspace, attachmentsDi
     seen.add(key);
     if (!existsSync(source) || !IMAGE_EXTENSION.test(source)) continue;
     const info = await stat(source).catch(() => null);
-    if (!info?.isFile() || info.size < 1 || info.size > 20_000_000) continue;
+    if (!info?.isFile() || info.size < 1 || info.size > 20_000_000 || info.mtimeMs < since) continue;
     const extension = extname(source).toLowerCase() || ".png";
     const safeBase = basename(source, extname(source)).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "imagem";
     const name = `generated-${safeBase}-${randomUUID()}${extension}`;
