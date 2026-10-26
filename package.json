@@ -65,7 +65,7 @@
       {
         "from": "vendor/tunnel-client",
         "to": "tunnel-client",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!**/*.zip"]
       }
     ],
     "win": {

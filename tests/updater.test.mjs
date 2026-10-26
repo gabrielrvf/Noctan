@@ -65,6 +65,8 @@ test('main branch publishes incrementing GitHub releases deterministically', () 
   assert.match(workflow, /needs: \[release, mac\]/);
   assert.equal(pkg.build.mac.hardenedRuntime, true);
   assert.equal(pkg.build.mac.entitlements, 'build/entitlements.mac.plist');
+  // Notarization rejects the unsigned binaries inside the downloaded tunnel archive.
+  assert.ok(pkg.build.extraResources[0].filter.includes('!**/*.zip'));
   assert.match(workflow, /CSC_LINK: \$\{\{ secrets\.CSC_LINK \}\}/);
   assert.match(workflow, /-c\.mac\.identity=- -c\.mac\.hardenedRuntime=false/);
   assert.match(workflow, /dist\/latest-mac\.yml/);
