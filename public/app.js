@@ -529,12 +529,15 @@ async function refresh() {
 function agentStatusLabel(status) {
   return ({running:"Rodando",pending:"Pendente",completed:"Concluído",failed:"Falhou",killed:"Parado",paused:"Pausado"})[status] || status || "Rodando";
 }
+// Roxo só enquanto algum agent está rodando; concluídos deixam o botão neutro.
+function updateAgentsButton() {
+  $("agentsCount").textContent = String(state.agents.length);
+  $("agentsBtn").classList.toggle("running", state.agents.some((agent) => ["running", "pending"].includes(agent.status || "running")));
+  show($("agentsBtn"), state.agents.length > 0);
+}
 function setSessionAgents(agents) {
   state.agents = Array.isArray(agents) ? agents : [];
-  const btn = $("agentsBtn");
-  const count = state.agents.length;
-  $("agentsCount").textContent = String(count);
-  show(btn, count > 0);
+  updateAgentsButton();
   if (state.selectedAgentId && !state.agents.some((agent) => agent.id === state.selectedAgentId)) state.selectedAgentId = null;
   renderAgents();
 }
@@ -543,8 +546,7 @@ function upsertSessionAgent(agent) {
   const index = state.agents.findIndex((item) => item.id === agent.id);
   if (index === -1) state.agents.push(agent);
   else state.agents[index] = agent;
-  $("agentsCount").textContent = String(state.agents.length);
-  show($("agentsBtn"), state.agents.length > 0);
+  updateAgentsButton();
   renderAgents();
 }
 function renderAgents() {

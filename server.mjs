@@ -493,8 +493,17 @@ function redact(obj) {
   );
 }
 
+// Só subagents de verdade: task_started local_agent já registrado, ou evento que traz subagent_type.
+function isAgentTask(s, m) {
+  return !m.task_id || Boolean(s.agents?.[m.task_id] || m.subagent_type);
+}
+// Esconde "agents" antigos criados por tarefas de terminal (sem tarefa, sem conversa).
+function isRealAgent(agent) {
+  return Boolean(agent.taskType || agent.backfilledFromTranscript || agent.prompt ||
+    (agent.events || []).some((event) => ["assistant", "user", "thinking"].includes(event.kind)));
+}
 function sessionAgentsView(s) {
-  return Object.values(s.agents || {}).sort((a,b) => String(a.startedAt || "").localeCompare(String(b.startedAt || "")));
+  return Object.values(s.agents || {}).filter(isRealAgent).sort((a,b) => String(a.startedAt || "").localeCompare(String(b.startedAt || "")));
 }
 function textBlocks(content, includeThinking = true) {
   if (typeof content === "string") return content.trim() ? [{ kind: "message", text: content.trim() }] : [];
@@ -1032,6 +1041,18 @@ async function runAgent(req, res) {
         sessions[id] = s;
         await saveJson(SESSIONS, sessions);
         emitAgent(res, agent);
+      } else if (m.type === "system" && m.subtype === "task_notification" && s.agents?.[m.task_id]) {
+        const agent = ensureSessionAgent(s, m.task_id, {
+          status: m.status === "stopped" ? "killed" : m.status,
+          summary: m.summary || "",
+          endedAt: new Date().toISOString(),
+        });
+        if (m.summary) addSessionAgentEvent(agent, "message", m.summary);
+        sessions[id] = s;
+        await saveJson(SESSIONS, sessions);
+        emitAgent(res, agent);
+      } else if (!isAgentTask(s, m)) {
+        // Tarefa em segundo plano que não é subagent (comando de terminal, monitor...): não vira "agent".
       } else if (m.type === "system" && m.subtype === "task_progress" && m.task_id) {
         const agent = ensureSessionAgent(s, m.task_id, {
           description: m.description || undefined,

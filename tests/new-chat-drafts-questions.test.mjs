@@ -42,3 +42,13 @@ test("code blocks get a copy button that writes to the clipboard", async () => {
   assert.match(css, /\.codeCopy \{/);
   assert.match(desktop, /permission === "clipboard-sanitized-write"/);
 });
+
+test("background shell tasks do not become agents and finished agents stop the purple badge", async () => {
+  const [server, app, css, html] = await Promise.all([read("server.mjs"), read("public/app.js"), read("public/style.css"), read("public/index.html")]);
+  assert.match(server, /else if \(!isAgentTask\(s, m\)\) \{/);
+  assert.match(server, /Object\.values\(s\.agents \|\| \{\}\)\.filter\(isRealAgent\)/);
+  assert.match(server, /m\.subtype === "task_notification" && s\.agents\?\.\[m\.task_id\]/);
+  assert.match(app, /classList\.toggle\("running", state\.agents\.some/);
+  assert.match(css, /\.agentsButton\.running\{/);
+  assert.doesNotMatch(html, /assistente local/);
+});
