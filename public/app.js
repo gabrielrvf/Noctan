@@ -645,6 +645,7 @@ async function sendAgentMessage(agentId, prompt) {
 }
 async function loadSession(id) {
   if (state.running && state.current === id) return;
+  saveDraft();
   viewEpoch += 1;
   detachRun();
   state.current = id;
@@ -654,7 +655,7 @@ async function loadSession(id) {
   state.provider = state.config.provider === "openai" ? "openai" : "anthropic";
   updateProviderUI();
   setPromptHistory(s);
-  $("prompt").value = "";
+  restoreDraft(id);
   $("conversationTitle").textContent = s.title;
   $("chat").replaceChildren();
   let cost = 0;
@@ -760,6 +761,19 @@ function togglePopover(id) {
 // Sai da conversa em execução sem pará-la: o servidor segue rodando e salva a resposta.
 let runAbort = null;
 let viewEpoch = 0;
+// Rascunho por conversa: o que foi digitado e não enviado volta ao reabrir a conversa.
+const promptDrafts = (() => { try { return JSON.parse(localStorage.getItem("noctan.drafts")) || {}; } catch { return {}; } })();
+let draftKey = null; // conversa dona do texto na caixa; null até a primeira tela abrir
+function saveDraft() {
+  if (draftKey === null) return;
+  const text = $("prompt").value;
+  if (text.trim()) promptDrafts[draftKey] = text; else delete promptDrafts[draftKey];
+  try { localStorage.setItem("noctan.drafts", JSON.stringify(promptDrafts)); } catch {}
+}
+function restoreDraft(key) {
+  draftKey = key;
+  $("prompt").value = promptDrafts[key] || "";
+}
 function detachRun() {
   if (!state.running) return;
   endProgress();
@@ -769,6 +783,7 @@ function detachRun() {
   $("runStatus").textContent = "Aguardando mensagem";
 }
 function newSession() {
+  saveDraft();
   viewEpoch += 1;
   detachRun();
   state.current = null;
@@ -777,7 +792,7 @@ function newSession() {
   state.editReplayIndex = null;
   state.renderedMessageCount = 0;
   setPromptHistory(null);
-  $("prompt").value = "";
+  restoreDraft("new");
   state.cost = 0;
   updateCost();
   $("conversationTitle").textContent = "Novo chat";
@@ -972,6 +987,57 @@ function approval(a) {
   }
   show(p, true);
 }
+// Pergunta de múltipla escolha do agente (AskUserQuestion), como no Claude Code:
+// uma pergunta de escolha única responde no clique; senão marca e clica em Enviar.
+function askQuestion(q) {
+  const p = $("pending");
+  p.replaceChildren();
+  const questions = q.questions || [];
+  const picked = questions.map(() => new Set());
+  const others = [];
+  const answerNow = () => {
+    const answers = {};
+    questions.forEach((item, i) => {
+      const value = [...picked[i], others[i].value.trim()].filter(Boolean).join(", ");
+      if (value) answers[item.question] = value;
+    });
+    if (!Object.keys(answers).length) return note("Escolha uma opção.");
+    show(p, false);
+    request("/api/approve", { method: "POST", body: JSON.stringify({ id: q.id, allow: true, answers }) }).catch((e) => note(e.message));
+  };
+  const instant = questions.length === 1 && !questions[0].multiSelect;
+  questions.forEach((item, i) => {
+    const title = document.createElement("strong");
+    title.textContent = item.question || item.header || "Pergunta";
+    p.append(title, document.createElement("br"));
+    for (const option of item.options || []) {
+      const b = document.createElement("button");
+      b.textContent = option.label;
+      b.title = option.description || "";
+      b.onclick = () => {
+        if (instant) { picked[i] = new Set([option.label]); return answerNow(); }
+        if (!item.multiSelect) picked[i].clear();
+        if (b.classList.toggle("picked")) picked[i].add(option.label); else picked[i].delete(option.label);
+        if (!item.multiSelect) for (const sibling of b.parentElement.querySelectorAll(`button[data-q="${i}"]`)) if (sibling !== b) sibling.classList.remove("picked");
+      };
+      b.dataset.q = String(i);
+      p.append(b);
+    }
+    const other = document.createElement("input");
+    other.placeholder = "Outra resposta...";
+    other.onkeydown = (e) => { if (e.key === "Enter") answerNow(); };
+    others[i] = other;
+    p.append(other, document.createElement("br"));
+  });
+  if (!instant) {
+    const submit = document.createElement("button");
+    submit.textContent = "Enviar";
+    submit.onclick = answerNow;
+    p.append(submit);
+  }
+  show(p, true);
+  if (!document.hasFocus()) window.noctanDesktop?.notify?.("Noctan está fazendo uma pergunta", questions[0]?.question || "");
+}
 async function resumeInterruptedRun(session) {
   if (!session?.inFlight || state.running) return;
   state.resumeInterrupted = true;
@@ -1052,6 +1118,7 @@ async function send() {
     if (prompt && !resumeInterrupted) { sentPrompts.unshift(prompt); sentPrompts = sentPrompts.slice(0,100); }
     resetPromptNavigation();
     $("prompt").value = "";
+    saveDraft();
     message("user", prompt || "Arquivo anexado", attachments);
     state.attachments = [];
     renderAttachments();
@@ -1073,6 +1140,7 @@ async function send() {
   const attachments = [...state.attachments];
   const replayEditIndex = Number.isInteger(state.editReplayIndex) ? state.editReplayIndex : null;
   $("prompt").value = "";
+  saveDraft();
   state.attachments = [];
   renderAttachments();
   if (!state.current) {
@@ -1085,6 +1153,7 @@ async function send() {
   if (targetMeta) { targetMeta.startedAt = Date.now(); targetMeta.events = []; targetMeta.realStatus = ""; targetMeta.active = true; }
   beginProgress(targetSessionId);
   let streamSessionId = targetSessionId;
+  const sendViewEpoch = viewEpoch;
   const ownsView = () => Boolean(streamSessionId && state.current === streamSessionId);
   let response = null;
   let assistant = null;
@@ -1158,8 +1227,14 @@ async function send() {
             state.liveRuns.delete(previousStreamSessionId);
             state.liveRuns.set(streamSessionId, meta);
           }
+          // Conversa nova: o id só chega agora. Se o usuário continua na tela de
+          // "Novo chat", ela passa a ser esta conversa (senão a resposta ia para
+          // outra conversa e a próxima mensagem criava mais uma).
+          if (!previousStreamSessionId && !state.current && viewEpoch === sendViewEpoch) {
+            state.current = streamSessionId;
+            draftKey = streamSessionId;
+          }
           if (ownsView()) {
-            state.current = data.sessionId;
             await refresh();
             updateProgress("Preparando execu\u00e7\u00e3o");
             pollLiveSnapshot(streamSessionId, ctrl.signal);
@@ -1201,6 +1276,7 @@ async function send() {
         }
         if (type === "commands") { if (!ownsView()) continue; setSlashCommands(data.commands); renderSlashMenu(); }
         if (type === "approval") { recordLiveRunEvent(streamSessionId, "Aguardando autorização", "Aguardando autorização"); if (!ownsView()) continue; updateProgress("Aguardando autoriza\u00e7\u00e3o"); approval(data); }
+        if (type === "question") { recordLiveRunEvent(streamSessionId, "Aguardando sua resposta", "Aguardando sua resposta"); if (!ownsView()) continue; updateProgress("Aguardando sua resposta"); askQuestion(data); }
         if (type === "result") {
           recordLiveRunEvent(streamSessionId, "Execução concluída");
           if (!ownsView()) continue;
@@ -2144,7 +2220,7 @@ $("prompt").onkeydown = (e) => {
     send();
   }
 };
-$("prompt").addEventListener("input", () => { slashSelection = 0; renderSlashMenu(); });
+$("prompt").addEventListener("input", () => { slashSelection = 0; renderSlashMenu(); saveDraft(); });
 $("cancel").onclick = async () => {
   if (state.current)
     await request("/api/cancel", {

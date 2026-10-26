@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("noctanUpdater", {
 });
 
 contextBridge.exposeInMainWorld("noctanDesktop", {
+  notify: (title, body) => ipcRenderer.send("desktop:notify", { title, body }),
   onHandoff: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on("handoff:open", handler);

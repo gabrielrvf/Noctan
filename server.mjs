@@ -900,7 +900,7 @@ async function runAgent(req, res) {
         preset: "claude_code",
         append:
           config.systemInstructions +
-          "\nFollow the project instructions and persistent memory files. Never print secrets. For work with two or more concrete steps, create and maintain a task list with the available TodoWrite or TaskCreate/TaskUpdate tools so the user can follow progress live.",
+          "\nFollow the project instructions and persistent memory files. Never print secrets. For work with two or more concrete steps, create and maintain a task list with the available TodoWrite or TaskCreate/TaskUpdate tools so the user can follow progress live. When you need the user to choose between options, use the AskUserQuestion tool instead of listing the options in plain text.",
       },
       additionalDirectories: extra,
       abortController: ctrl,
@@ -918,6 +918,29 @@ async function runAgent(req, res) {
     opts.canUseTool = async (toolName, input) => {
       if (ctrl.signal.aborted)
         return { behavior: "deny", message: "Execução cancelada" };
+      // Pergunta de múltipla escolha: nunca auto-aprova; espera o clique do usuário.
+      if (toolName === "AskUserQuestion") {
+        const qid = randomUUID();
+        send(res, "question", { id: qid, questions: Array.isArray(input?.questions) ? input.questions : [] });
+        return await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            approvals.delete(qid);
+            resolve({ behavior: "deny", message: "O usuário não respondeu a pergunta" });
+          }, 30 * 60000);
+          approvals.set(qid, {
+            sessionId: id,
+            decide: (allowed, answers) => {
+              clearTimeout(timer);
+              approvals.delete(qid);
+              resolve(
+                allowed && answers && typeof answers === "object"
+                  ? { behavior: "allow", updatedInput: { ...input, answers } }
+                  : { behavior: "deny", message: "O usuário não respondeu a pergunta" },
+              );
+            },
+          });
+        });
+      }
       if (config.bypassAllPermissions || active.get(id)?.autoApproveAll)
         return { behavior: "allow", updatedInput: input };
       const aid = randomUUID();
@@ -1702,7 +1725,7 @@ const server = http.createServer(async (req, res) => {
         const run = active.get(a.sessionId);
         if (run) run.autoApproveAll = true;
       }
-      a.decide(b.allow === true);
+      a.decide(b.allow === true, b.answers);
       if ((b.allowAll === true || b.bypassAll === true) && b.allow === true) {
         for (const [approvalId, pending] of approvals) {
           if (approvalId !== b.id && pending.sessionId === a.sessionId) pending.decide(true);

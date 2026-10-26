@@ -679,6 +679,13 @@ h1 {
 .pending button {
   margin-right: 8px;
 }
+.pending button.picked {
+  outline: 2px solid #b388df;
+}
+.pending input {
+  margin: 8px 0;
+  width: min(100%, 360px);
+}
 .officialCreditsButton {
   width: 100%;
   margin-top: 10px;

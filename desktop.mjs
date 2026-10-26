@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain, Notification } from "electron";
 import updaterPackage from "electron-updater";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -322,6 +322,13 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId("app.noctan.desktop");
+      // Aviso nativo (ex.: o agente fez uma pergunta); clicar reabre a janela, mesmo da bandeja.
+      ipcMain.on("desktop:notify", (_event, payload) => {
+        if (!Notification.isSupported()) return;
+        const notification = new Notification({ title: String(payload?.title || "Noctan").slice(0, 120), body: String(payload?.body || "").slice(0, 300) });
+        notification.on("click", showMainWindow);
+        notification.show();
+      });
       await setupAutoUpdater();
       return createWindow();
     })
