@@ -40,6 +40,7 @@
       "desktop.mjs",
       "bridge.mjs",
       "noctan-mcp.mjs",
+      "question-record.mjs",
       "external-handoff.mjs",
       "pc-controller-manager.mjs",
       "embedded-pc-controller.mjs",

@@ -10,6 +10,7 @@ import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelSta
 import { connectLocalPcController, disconnectLocalPcController, localPcControllerProxy, localPcControllerStatus } from "./pc-controller-manager.mjs";
 import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embedded-pc-controller.mjs";
 import { createNoctanMcpServer } from "./noctan-mcp.mjs";
+import { answeredQuestionsMarkdown } from "./question-record.mjs";
 import { importGeneratedImages } from "./generated-images.mjs";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { fileURLToPath } from "node:url";
@@ -942,6 +943,13 @@ async function runAgent(req, res) {
             decide: (allowed, answers) => {
               clearTimeout(timer);
               approvals.delete(qid);
+              if (allowed && answers && typeof answers === "object") {
+                // A pergunta e a resposta ficam na conversa, como foram enviadas.
+                const record = answeredQuestionsMarkdown(input?.questions, answers);
+                finalText += record + "\n";
+                send(res, "text", { text: record });
+                persistAssistant().catch(() => {});
+              }
               resolve(
                 allowed && answers && typeof answers === "object"
                   ? { behavior: "allow", updatedInput: { ...input, answers } }

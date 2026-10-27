@@ -1018,9 +1018,13 @@ function askQuestion(q) {
   };
   const instant = questions.length === 1 && !questions[0].multiSelect;
   questions.forEach((item, i) => {
+    // Cada pergunta num bloco próprio, uma embaixo da outra, todas respondíveis antes do Enviar.
+    const block = document.createElement("div");
+    block.className = "question";
     const title = document.createElement("strong");
     title.textContent = item.question || item.header || "Pergunta";
-    p.append(title, document.createElement("br"));
+    block.append(title);
+    p.append(block);
     for (const option of item.options || []) {
       const b = document.createElement("button");
       b.textContent = option.label;
@@ -1032,13 +1036,13 @@ function askQuestion(q) {
         if (!item.multiSelect) for (const sibling of b.parentElement.querySelectorAll(`button[data-q="${i}"]`)) if (sibling !== b) sibling.classList.remove("picked");
       };
       b.dataset.q = String(i);
-      p.append(b);
+      block.append(b);
     }
     const other = document.createElement("input");
     other.placeholder = "Outra resposta...";
     other.onkeydown = (e) => { if (e.key === "Enter") answerNow(); };
     others[i] = other;
-    p.append(other, document.createElement("br"));
+    block.append(other);
   });
   if (!instant) {
     const submit = document.createElement("button");

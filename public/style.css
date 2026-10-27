@@ -696,6 +696,23 @@ h1 {
 .pending button {
   margin-right: 8px;
 }
+.pending .question {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #4a3a28;
+}
+.pending .question strong {
+  flex: 1 0 100%;
+}
+.pending .question button {
+  margin-right: 0;
+}
+.pending .question input {
+  margin: 0;
+}
 .pending button.picked {
   outline: 2px solid #b388df;
 }
