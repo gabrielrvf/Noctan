@@ -113,6 +113,9 @@ async function setupAutoUpdater() {
     if (updateState.status !== "downloaded") {
       return { ok: false, status: updateState.status };
     }
+    // quitAndInstall closes the windows before "before-quit" fires; without this the
+    // tray's close handler hides the window and the app never quits (Squirrel.Mac waits forever).
+    isQuitting = true;
     setImmediate(() => autoUpdater.quitAndInstall(true, true));
     return { ok: true };
   });

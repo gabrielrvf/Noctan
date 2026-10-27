@@ -19,6 +19,7 @@ test('packaged app has GitHub auto updater configured', () => {
   assert.match(desktop, /autoUpdater\.autoInstallOnAppQuit = true/);
   assert.match(desktop, /checkForUpdates\(\)/);
   assert.match(desktop, /quitAndInstall\(true, true\)/); // silencioso: sem abrir o assistente do NSIS
+  assert.match(desktop, /isQuitting = true;\s*setImmediate\(\(\) => autoUpdater\.quitAndInstall/); // a bandeja não segura o app no Mac
   assert.match(desktop, /requestSingleInstanceLock\(\)/);
   assert.match(desktop, /isVersionStrictlyNewer\(info\?\.version, app\.getVersion\(\)\)/);
 });
