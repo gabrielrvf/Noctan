@@ -67,6 +67,8 @@ O Desktop empacota o runtime oficial do Secure MCP Tunnel correspondente à plat
 
 O endpoint `/mcp` aceita somente chamadas locais sem cabeçalho `Origin` e com `Host` igual a `127.0.0.1`/`localhost` na porta do Noctan; páginas do navegador não conseguem acioná-lo. Depois de atualizar o Noctan, atualize o conector no ChatGPT para ele reler a lista de ferramentas.
 
+Passo a passo para ligar o conector num PC novo (túnel, Runtime Key e prompts prontos): [docs/CONECTOR_CHATGPT.md](docs/CONECTOR_CHATGPT.md).
+
 O ChatGPT não descobre aplicativos locais apenas por uma instrução escrita no prompt. Para receber tarefas originadas no ChatGPT, a conta precisa autorizar uma vez o app/conector **Noctan**. Depois desse vínculo, não é necessário instalar o repositório PC Controller, Node.js ou manter PowerShell aberto. O Noctan Desktop precisa estar aberto (pode ficar minimizado), pois ele mantém o servidor local e o Secure MCP Tunnel ativos. Remover ou desconectar o app Noctan no ChatGPT remove esse canal e exige uma nova autorização. Uma distribuição pública sem configuração manual exigirá publicar o Noctan como App do ChatGPT com autenticação e roteamento por usuário; não é seguro compartilhar um único Tunnel ID ou uma Runtime Key entre usuários.
 
 As chaves salvas pelo Noctan ficam em arquivos protegidos pela criptografia vinculada ao usuário do Windows. Nunca publique chaves no GitHub, no README, no Vault ou em conversas compartilhadas.
