@@ -21,3 +21,10 @@ test("question panel stacks one block per question and the server records the an
   assert.match(app, /block\.className = "question"/);
   assert.match(server, /answeredQuestionsMarkdown\(input\?\.questions, answers\)/);
 });
+
+test("background run: follow-up bubble is drawn once by the poll and the thinking indicator shows", () => {
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /if \(state\.running\) message\("user", prompt \|\| "Arquivo anexado", attachments\);/);
+  assert.match(app, /if \(state\.remoteRunning && !wasRemote\) await loadSession\(targetSessionId\);/);
+  assert.match(app, /const liveMeta = ensureLiveRunMeta\(id\);\s*if \(!liveMeta\.active\)/);
+});

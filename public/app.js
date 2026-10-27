@@ -685,6 +685,9 @@ async function loadSession(id) {
     show($("cancel"), true);
     // ponytail: aprovação pedida em segundo plano só aparece se a execução for reaberta pelo servidor; hoje fica aguardando.
     $("runStatus").textContent = "Executando em segundo plano...";
+    // Execução que esta janela não começou (retomada após reiniciar, outra janela, celular): mostra o "pensando" mesmo assim.
+    const liveMeta = ensureLiveRunMeta(id);
+    if (!liveMeta.active) Object.assign(liveMeta, { active: true, events: [], realStatus: "", startedAt: Date.now() });
     restoreLiveProgress(id);
     renderProgressTasks(s.taskList);
     const poll = async () => {
@@ -1121,11 +1124,10 @@ async function send() {
   if (!resumeInterrupted && !prompt && !state.attachments.length) return;
   if (targetSessionId && !state.running && !resumeInterrupted) {
     const live = await request("/api/sessions/" + targetSessionId).catch(() => null);
+    const wasRemote = state.remoteRunning;
     state.remoteRunning = Boolean(live?.liveActive);
-    if (state.remoteRunning) {
-      show($("cancel"), true);
-      $("runStatus").textContent = "Executando em segundo plano...";
-    }
+    // Virou execução em segundo plano depois de abrir a conversa: recarrega para ligar o poll (que desenha a mensagem) e o "pensando".
+    if (state.remoteRunning && !wasRemote) await loadSession(targetSessionId);
   }
   if ((state.running || state.remoteRunning) && targetSessionId) {
     const attachments = [...state.attachments];
@@ -1134,7 +1136,8 @@ async function send() {
     resetPromptNavigation();
     $("prompt").value = "";
     saveDraft();
-    message("user", prompt || "Arquivo anexado", attachments);
+    // Em segundo plano quem desenha a mensagem é o poll da sessão; desenhar aqui também duplicava a bolha.
+    if (state.running) message("user", prompt || "Arquivo anexado", attachments);
     state.attachments = [];
     renderAttachments();
     assistantSegmentEpoch += 1;
