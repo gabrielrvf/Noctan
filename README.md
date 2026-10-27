@@ -60,7 +60,12 @@ Essa chave é usada pelo chat Claude dentro do Noctan. Consulte diretamente a An
 
 A **Runtime API Key do Secure Tunnel** é opcional e diferente da chave OpenAI usada pelo GPT. Ela só é necessária para entregar tarefas de uma sessão externa compatível do ChatGPT ao Noctan. Para usar o chat do próprio Noctan, a Runtime Key não é obrigatória.
 
-O Desktop empacota o runtime oficial do Secure MCP Tunnel correspondente à plataforma. Quando existe um túnel previamente vinculado à conta, o Noctan cria um perfil próprio, sem copiar a chave, preserva o perfil antigo e passa a expor pelo túnel somente `noctan_status` e `handoff_to_noctan`. A tarefa entra no histórico do Noctan e é executada pelo provedor e pelas ferramentas locais configuradas no aplicativo.
+O Desktop empacota o runtime oficial do Secure MCP Tunnel correspondente à plataforma. Quando existe um túnel previamente vinculado à conta, o Noctan cria um perfil próprio, sem copiar a chave, preserva o perfil antigo e passa a expor pelo túnel dois modos separados:
+
+- **Direto (`pc_controller_*`):** cada ferramenta do PC Controller integrado (ler/escrever arquivos, listar pastas, PowerShell, navegador etc.), com o mesmo nome após o prefixo, a mesma descrição e o mesmo JSON Schema. A chamada vai direto ao processo local do controlador: não passa por modelo de IA nem consome créditos do provedor.
+- **Delegação (`handoff_to_noctan`):** só quando o usuário pede para entregar a tarefa ao Noctan. A tarefa entra no histórico do Noctan e é executada pelo provedor de IA e pelas ferramentas locais configuradas no aplicativo.
+
+O endpoint `/mcp` aceita somente chamadas locais sem cabeçalho `Origin` e com `Host` igual a `127.0.0.1`/`localhost` na porta do Noctan; páginas do navegador não conseguem acioná-lo. Depois de atualizar o Noctan, atualize o conector no ChatGPT para ele reler a lista de ferramentas.
 
 O ChatGPT não descobre aplicativos locais apenas por uma instrução escrita no prompt. Para receber tarefas originadas no ChatGPT, a conta precisa autorizar uma vez o app/conector **Noctan**. Depois desse vínculo, não é necessário instalar o repositório PC Controller, Node.js ou manter PowerShell aberto. O Noctan Desktop precisa estar aberto (pode ficar minimizado), pois ele mantém o servidor local e o Secure MCP Tunnel ativos. Remover ou desconectar o app Noctan no ChatGPT remove esse canal e exige uma nova autorização. Uma distribuição pública sem configuração manual exigirá publicar o Noctan como App do ChatGPT com autenticação e roteamento por usuário; não é seguro compartilhar um único Tunnel ID ou uma Runtime Key entre usuários.
 

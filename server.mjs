@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { handoffFingerprint, normalizeExternalText } from "./external-handoff.mjs";
 import { saveApiKey, loadApiKey, removeApiKey } from "./secure-key.mjs";
 import { defaultControllerPath, startTunnel, stopTunnel, tunnelStatus, tunnelStatusLive } from "./tunnel-manager.mjs";
-import { connectLocalPcController, disconnectLocalPcController, localPcControllerStatus } from "./pc-controller-manager.mjs";
+import { connectLocalPcController, disconnectLocalPcController, localPcControllerProxy, localPcControllerStatus } from "./pc-controller-manager.mjs";
 import { embeddedPcControllerDefinition, withEmbeddedPcController } from "./embedded-pc-controller.mjs";
 import { createNoctanMcpServer } from "./noctan-mcp.mjs";
 import { importGeneratedImages } from "./generated-images.mjs";
@@ -1441,16 +1441,20 @@ try {
 } catch (error) {
   console.warn(`Noctan: falha preparando PC Controller local: ${error.message}`);
 }
+const mcpPcController = localPcControllerProxy(embeddedPcControllerDefinition);
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
     const path = url.pathname;
     if (path === "/mcp") {
+      // Agora o /mcp executa ferramentas do PC: só o túnel local entra. Navegador (Origin) e DNS rebinding (Host) ficam fora.
+      if (req.headers.origin || ![`${HOST}:${PORT}`, `localhost:${PORT}`].includes(String(req.headers.host)))
+        return json(res, 403, { error: "Origem não autorizada" });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
-      const mcpServer = createNoctanMcpServer({ baseUrl: `http://${HOST}:${PORT}` });
+      const mcpServer = createNoctanMcpServer({ baseUrl: `http://${HOST}:${PORT}`, pcController: mcpPcController });
       try {
         await mcpServer.connect(transport);
         await transport.handleRequest(req, res);

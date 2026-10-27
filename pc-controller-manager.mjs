@@ -83,6 +83,29 @@ export async function connectLocalPcController(definition) {
   }
 }
 
+let pending = null;
+
+// Proxy usado pelo endpoint /mcp: fala com o mesmo processo do PC Controller, reconectando se ele caiu.
+export function localPcControllerProxy(getDefinition) {
+  async function ready() {
+    if (!client || state !== "connected") {
+      pending ||= connectLocalPcController(getDefinition()).finally(() => { pending = null; });
+      await pending;
+    }
+    if (!client) throw new Error(lastError || message);
+    return client;
+  }
+  return {
+    async listTools() {
+      return (await (await ready()).listTools()).tools || [];
+    },
+    async callTool(name, args) {
+      // Comandos longos do controlador vão até 300 s (maxCommandTimeoutMs).
+      return (await ready()).callTool({ name, arguments: args }, undefined, { timeout: 310_000 });
+    },
+  };
+}
+
 export async function disconnectLocalPcController() {
   closing = true;
   state = "stopping";
