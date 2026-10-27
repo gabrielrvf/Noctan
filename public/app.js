@@ -1593,6 +1593,7 @@ $("connectAll").onclick = async () => {
   const openaiKey = $("openaiApiKey").value.trim();
   const anthropicKey = $("anthropicApiKey").value.trim();
   const runtimeKey = $("tunnelRuntimeKey").value.trim();
+  const tunnelId = $("tunnelId").value.trim();
   const button = $("connectAll");
   button.disabled = true;
   button.textContent = "Conectando...";
@@ -1623,6 +1624,7 @@ $("connectAll").onclick = async () => {
         method: "POST",
         body: JSON.stringify({
           runtimeKey,
+          tunnelId,
           autoStart: true,
         }),
       });
@@ -1634,6 +1636,7 @@ $("connectAll").onclick = async () => {
     $("openaiApiKey").value = "";
     $("anthropicApiKey").value = "";
     $("tunnelRuntimeKey").value = "";
+    $("tunnelId").value = "";
     await refresh();
     button.textContent = "Conectado \u2713";
     setTimeout(() => show($("connectModal"), false), 650);

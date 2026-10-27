@@ -186,7 +186,7 @@ export async function tunnelStatusLive(profileName) {
   };
 }
 
-export async function startTunnel({ controllerPath, profile, runtimeKey }) {
+export async function startTunnel({ controllerPath, profile, runtimeKey, tunnelId = "" }) {
   const profileName = profile || "mcp-chatgpt-full-pc-dev";
   const existing = await tunnelStatusLive(profileName);
   if (existing.status === "connected") return existing;
@@ -204,9 +204,7 @@ export async function startTunnel({ controllerPath, profile, runtimeKey }) {
     throw Error("O Secure MCP Tunnel não está incluído nesta instalação do Noctan.");
   if (!runtimeKey)
     throw Error("Informe a Runtime API Key do Secure MCP Tunnel.");
-  if (!existsSync(profilePath(profileName)))
-    throw Error("O túnel ainda não foi vinculado à conta do ChatGPT neste computador.");
-  const managed = ensureNoctanTunnelProfile(profileName, { port: Number(process.env.PORT || 4177) });
+  const managed = ensureNoctanTunnelProfile(profileName, { port: Number(process.env.PORT || 4177), tunnelId });
   const repaired = [];
 
   state = {

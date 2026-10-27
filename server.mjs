@@ -1630,6 +1630,7 @@ const server = http.createServer(async (req, res) => {
         controllerPath: config.pcControllerPath,
         profile: config.tunnelProfile,
         runtimeKey: process.env.NOCTAN_TUNNEL_RUNTIME_KEY,
+        tunnelId: String(body.tunnelId || "").trim(),
       });
       return json(res, 200, { ok: true, status });
     }

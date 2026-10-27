@@ -31,16 +31,20 @@ export function ensureNoctanTunnelProfile(profileName, {
   port = 4177,
   sourcePath = sourceTunnelProfilePath(profileName),
   targetPath = managedTunnelProfilePath(profileName),
+  tunnelId: explicitTunnelId = "",
 } = {}) {
   const source = sourcePath;
   const target = targetPath;
-  if (!existsSync(source) && !existsSync(target))
-    throw new Error("O túnel ainda não foi vinculado à conta do ChatGPT neste computador.");
+  const typedId = String(explicitTunnelId || "").trim();
+  // Tunnel ID digitado no Noctan dispensa o perfil antigo (PC novo); sem ele, reaproveita o perfil existente.
+  if (!typedId && !existsSync(source) && !existsSync(target))
+    throw new Error("Informe o Tunnel ID do Secure MCP Tunnel (começa com tunnel_).");
 
-  const original = readFileSync(existsSync(source) ? source : target, "utf8");
-  const tunnelId = field(original, "tunnel_id");
+  // O perfil do Noctan (último Tunnel ID usado) vem antes do perfil antigo, para o ID digitado continuar valendo nas reconexões.
+  const original = existsSync(target) ? readFileSync(target, "utf8") : existsSync(source) ? readFileSync(source, "utf8") : "";
+  const tunnelId = typedId || field(original, "tunnel_id");
   if (!/^tunnel_[a-z0-9_]{32,}$/.test(tunnelId))
-    throw new Error("O perfil do túnel não contém um Tunnel ID válido.");
+    throw new Error(typedId ? "Tunnel ID inválido: ele começa com tunnel_ e vem da OpenAI Platform." : "O perfil do túnel não contém um Tunnel ID válido.");
 
   const baseUrl = field(original, "base_url", "https://api.openai.com");
   const urlPath = field(original, "url_path");
